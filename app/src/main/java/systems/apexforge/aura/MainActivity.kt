@@ -2,7 +2,6 @@ package systems.apexforge.aura
 
 import android.Manifest
 import android.content.ComponentName
-import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
@@ -41,7 +40,6 @@ class MainActivity : AppCompatActivity() {
     private val notificationPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) {
-        // A denied notification permission does not disable the foreground-service task manager entry.
         startSessionService()
     }
 
@@ -105,7 +103,9 @@ class MainActivity : AppCompatActivity() {
             setPadding(0, 8, 0, 18)
         }
         previewView = PreviewView(this).apply {
-            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+            // SurfaceView-backed rendering avoids an extra app-composited preview
+            // layer; the transparent landmark HUD is drawn above it.
+            implementationMode = PreviewView.ImplementationMode.PERFORMANCE
             scaleType = PreviewView.ScaleType.FILL_CENTER
         }
         handOverlay = HandOverlayView(this).apply {
@@ -141,7 +141,7 @@ class MainActivity : AppCompatActivity() {
             LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
         ))
         root.addView(TextView(this).apply {
-            text = "FRONT CAMERA • STRICT SAFETY • LOCAL HAND TRACKING"
+            text = "FRONT CAMERA • ONE-HAND CONTROL • ON-DEVICE INFERENCE"
             textSize = 10f
             setTextColor(Color.LTGRAY)
             setPadding(0, 16, 0, 0)
@@ -176,7 +176,7 @@ class MainActivity : AppCompatActivity() {
         serviceBound = bindService(
             Intent(this, AuraCameraService::class.java),
             serviceConnection,
-            Context.BIND_AUTO_CREATE
+            BIND_AUTO_CREATE
         )
     }
 
