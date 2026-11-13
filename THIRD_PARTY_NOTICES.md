@@ -2,7 +2,7 @@
 
 ## MediaPipe Tasks Vision
 
-Google MediaPipe Tasks Vision is included as the Android dependency `com.google.mediapipe:tasks-vision:0.10.21`.
+Google MediaPipe Tasks Vision is included as the Android dependency `com.google.mediapipe:tasks-vision:1.2.2`.
 Copyright Google LLC. Distributed under the Apache License, Version 2.0.
 License: https://github.com/google-ai-edge/mediapipe/blob/master/LICENSE
 
