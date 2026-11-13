@@ -29,8 +29,8 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 /**
- * Keeps the front camera and on-device hand inference alive while the user
- * switches to other apps. It is started only by an explicit foreground action.
+ * Keeps the front camera and on-device single-hand inference alive while the
+ * user switches to other apps. It starts only after an explicit user action.
  */
 class AuraCameraService : LifecycleService() {
     inner class LocalBinder : Binder() {
@@ -45,7 +45,6 @@ class AuraCameraService : LifecycleService() {
     private var attachedPreviewProvider: Preview.SurfaceProvider? = null
     private var analyzer: HandLandmarkAnalyzer? = null
     private var analysisExecutor: ExecutorService? = null
-    private var lastInjectedAt = 0L
     private var listener: ((String, List<HandFrame>) -> Unit)? = null
     private var started = false
 
@@ -108,6 +107,8 @@ class AuraCameraService : LifecycleService() {
         analyzer = null
         analysisExecutor = null
         if (oldAnalyzer != null && oldExecutor != null) {
+            // Close the GPU delegate on the same worker thread that created and
+            // used it; then shut down the single-thread analysis executor.
             oldExecutor.execute { oldAnalyzer.close() }
             oldExecutor.shutdown()
         }
@@ -121,36 +122,38 @@ class AuraCameraService : LifecycleService() {
             stopSelf()
             return
         }
-        val executor = Executors.newSingleThreadExecutor()
-        val handAnalyzer = try {
-            HandLandmarkAnalyzer(
-                applicationContext,
-                onHands = { hands, timestamp ->
-                    val command = gestureEngine.process(hands, timestamp)
-                    mainHandler.post { handleCommand(command, hands) }
-                },
-                onError = { message -> mainHandler.post {
+
+        val executor = Executors.newSingleThreadExecutor { task ->
+            Thread({
+                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_DISPLAY)
+                task.run()
+            }, "AURA-Inference")
+        }
+        val handAnalyzer = HandLandmarkAnalyzer(
+            applicationContext,
+            onHands = { hands, timestamp ->
+                val command = gestureEngine.process(hands, timestamp)
+                mainHandler.post { handleCommand(command, hands) }
+            },
+            onError = { message ->
+                mainHandler.post {
                     publishStatus("TRACKING ERROR · $message")
                     listener?.invoke(currentStatus, emptyList())
-                } }
-            )
-        } catch (failure: Exception) {
-            executor.shutdown()
-            Log.e(TAG, "Could not initialize hand model", failure)
-            publishStatus("MODEL INIT ERROR · " + failure.javaClass.simpleName)
-            listener?.invoke(currentStatus, emptyList())
-            stopSelf()
-            return
-        }
+                }
+            }
+        )
 
         val analysis = ImageAnalysis.Builder()
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-            .setTargetResolution(android.util.Size(640, 480))
+            .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
+            .setTargetResolution(android.util.Size(480, 360))
             .build()
             .also { it.setAnalyzer(executor, handAnalyzer) }
-        val cameraPreview = Preview.Builder().build().also {
-            it.setSurfaceProvider(attachedPreviewProvider)
-        }
+        val cameraPreview = Preview.Builder()
+            .setTargetResolution(android.util.Size(640, 480))
+            .build()
+            .also { it.setSurfaceProvider(attachedPreviewProvider) }
+
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
             try {
@@ -166,7 +169,7 @@ class AuraCameraService : LifecycleService() {
                 analyzer = handAnalyzer
                 analysisExecutor = executor
                 started = true
-                publishStatus("AURA ACTIVE · HAND TRACKING READY")
+                publishStatus("AURA ACTIVE · SINGLE-HAND GPU/CPU TRACKING")
                 listener?.invoke(currentStatus, emptyList())
             } catch (failure: Exception) {
                 Log.e(TAG, "Camera binding failed", failure)
@@ -184,15 +187,15 @@ class AuraCameraService : LifecycleService() {
         val service = AuraAccessibilityService.activeInstance
         if (hands.isEmpty() || hands.none { it.confidence >= 0.88f }) {
             service?.hidePointer()
-            publishStatus("NO CONFIDENT HANDS · SAFE IDLE")
+            publishStatus("NO CONFIDENT HAND · SAFE IDLE")
             listener?.invoke(currentStatus, emptyList())
             return
         }
         when (command) {
             is AuraCommand.Pointer -> {
                 service?.showPointer(command.x, command.y)
-                if (service == null) publishStatus("HANDS FOUND · ENABLE AURA ACCESSIBILITY")
-                else publishStatus("TRACKING · ${hands.size} HAND")
+                if (service == null) publishStatus("HAND FOUND · ENABLE AURA ACCESSIBILITY")
+                else publishStatus("TRACKING · ONE HAND")
             }
             is AuraCommand.Tap -> {
                 val ok = service?.tapNormalized(command.x, command.y) == true
@@ -205,20 +208,6 @@ class AuraCameraService : LifecycleService() {
             is AuraCommand.Swipe -> {
                 val ok = service?.swipeNormalized(command.x1, command.y1, command.x2, command.y2, command.durationMs) == true
                 publishStatus(if (ok) "DRAG / SWIPE" else "DRAG · ACCESSIBILITY REQUIRED OR BUSY")
-            }
-            is AuraCommand.Zoom -> {
-                service?.hidePointer()
-                val now = android.os.SystemClock.uptimeMillis()
-                if (service != null && now - lastInjectedAt >= 125L) {
-                    lastInjectedAt = now
-                    val ok = service.pinchNormalized(
-                        command.fromA.x, command.fromA.y, command.fromB.x, command.fromB.y,
-                        command.toA.x, command.toA.y, command.toB.x, command.toB.y
-                    )
-                    publishStatus(if (ok) {
-                        if (command.scaleDelta > 0f) "ZOOM IN" else "ZOOM OUT"
-                    } else "ZOOM · ACTION BUSY")
-                } else if (service == null) publishStatus("TWO-HAND ZOOM · ENABLE ACCESSIBILITY")
             }
             is AuraCommand.System -> {
                 service?.hidePointer()
@@ -235,9 +224,9 @@ class AuraCameraService : LifecycleService() {
             }
             AuraCommand.Pause -> {
                 service?.hidePointer()
-                publishStatus("PAUSED · OPEN HANDS")
+                publishStatus("PAUSED · OPEN PALM")
             }
-            AuraCommand.NoOp -> if (hands.size >= 2) service?.hidePointer()
+            AuraCommand.NoOp -> Unit
         }
         listener?.invoke(currentStatus, hands)
     }
