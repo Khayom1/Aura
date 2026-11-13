@@ -31,7 +31,7 @@ val expectedModelSize = 7_819_105L
 val expectedModelSha256 = "fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bcf3607cde1"
 fun sha256(file: File): String = MessageDigest.getInstance("SHA-256")
     .digest(file.readBytes())
-    .joinToString("") { "%02x".format(it) }
+    .joinToString("") { "%02x".format(it.toInt() and 0xff) }
 
 val downloadHandModel by tasks.registering {
     outputs.file(handModel)
