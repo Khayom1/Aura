@@ -201,7 +201,9 @@ class MainActivity : AppCompatActivity() {
                 service?.hidePointer()
                 status.text = "PAUSED · OPEN HANDS DETECTED"
             }
-            AuraCommand.NoOp -> Unit
+            AuraCommand.NoOp -> {
+                if (handCount >= 2) service?.hidePointer()
+            }
         }
     }
 
