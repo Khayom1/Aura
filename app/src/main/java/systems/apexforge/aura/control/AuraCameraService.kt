@@ -102,7 +102,10 @@ class AuraCameraService : LifecycleService() {
                     val command = gestureEngine.process(hands, timestamp)
                     mainHandler.post { handleCommand(command, hands) }
                 },
-                onError = { message -> mainHandler.post { publishStatus("TRACKING ERROR · $message") } }
+                onError = { message -> mainHandler.post {
+                    publishStatus("TRACKING ERROR · $message")
+                    listener?.invoke(currentStatus, emptyList())
+                } }
             )
         } catch (failure: Exception) {
             executor.shutdown()
