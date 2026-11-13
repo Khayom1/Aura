@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">AURA</string>
+    <string name="aura_accessibility_description">Allows AURA to perform user-requested touch gestures after you explicitly enable the service.</string>
+</resources>
