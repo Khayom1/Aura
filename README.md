@@ -30,7 +30,7 @@ The GitHub Actions workflow runs unit tests and builds a debug APK. It downloads
 - JDK 17
 - Gradle 8.11.1
 - Android SDK platform 35
-- MediaPipe Tasks Vision 0.10.21
+- MediaPipe Tasks Vision 1.2.2
 
 ## Install and first use
 
