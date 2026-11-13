@@ -132,6 +132,11 @@ class MainActivity : AppCompatActivity() {
     private fun handleCommand(command: AuraCommand, handCount: Int) {
         if (!sessionActive) return
         val service = AuraAccessibilityService.activeInstance
+        if (handCount == 0) {
+            service?.hidePointer()
+            status.text = "NO HANDS · SAFE IDLE"
+            return
+        }
         when (command) {
             is AuraCommand.Pointer -> {
                 service?.showPointer(command.x, command.y)
@@ -160,6 +165,7 @@ class MainActivity : AppCompatActivity() {
                 status.text = "COMMAND MODE · V-SWIPE: BACK / HOME / RECENTS / PANELS"
             }
             is AuraCommand.Zoom -> {
+                service?.hidePointer()
                 val now = android.os.SystemClock.uptimeMillis()
                 if (service != null && now - lastInjectedAt >= 125L) {
                     lastInjectedAt = now
