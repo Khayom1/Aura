@@ -27,6 +27,8 @@ import systems.apexforge.aura.gesture.HandLandmarkAnalyzer
 import systems.apexforge.aura.gesture.SystemAction
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Keeps the front camera and on-device single-hand inference alive while the
@@ -47,6 +49,9 @@ class AuraCameraService : LifecycleService() {
     private var analysisExecutor: ExecutorService? = null
     private var listener: ((String, List<HandFrame>) -> Unit)? = null
     private var started = false
+    private data class PointerUpdate(val command: AuraCommand.Pointer, val hands: List<HandFrame>)
+    private val latestPointer = AtomicReference<PointerUpdate?>(null)
+    private val pointerDispatchScheduled = AtomicBoolean(false)
 
     override fun onCreate() {
         super.onCreate()
@@ -98,6 +103,7 @@ class AuraCameraService : LifecycleService() {
 
     private fun releaseCameraPipeline() {
         started = false
+        latestPointer.set(null)
         cameraProvider?.unbindAll()
         cameraProvider = null
         preview = null
@@ -133,7 +139,14 @@ class AuraCameraService : LifecycleService() {
             applicationContext,
             onHands = { hands, timestamp ->
                 val command = gestureEngine.process(hands, timestamp)
-                mainHandler.post { handleCommand(command, hands) }
+                if (command is AuraCommand.Pointer) {
+                    latestPointer.set(PointerUpdate(command, hands))
+                    dispatchLatestPointer()
+                } else {
+                    // Discrete actions must never be overwritten by a later
+                    // high-frequency pointer frame.
+                    mainHandler.post { handleCommand(command, hands) }
+                }
             },
             onError = { message ->
                 mainHandler.post {
@@ -145,7 +158,8 @@ class AuraCameraService : LifecycleService() {
 
         val analysis = ImageAnalysis.Builder()
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-            .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
+            // Use CameraX's native YUV_420_888 stream. Forcing RGBA adds a
+            // per-frame YUV-to-RGB conversion before MediaPipe can process it.
             .setTargetResolution(android.util.Size(480, 360))
             .build()
             .also { it.setAnalyzer(executor, handAnalyzer) }
@@ -180,6 +194,23 @@ class AuraCameraService : LifecycleService() {
                 stopSelf()
             }
         }, ContextCompat.getMainExecutor(this))
+    }
+
+    /**
+     * Pointer tracking may emit one result per camera frame. Keep only the
+     * newest point and post at most one UI runnable at a time. Discrete
+     * gestures use a separate lossless path.
+     */
+    private fun dispatchLatestPointer() {
+        if (!pointerDispatchScheduled.compareAndSet(false, true)) return
+        mainHandler.post {
+            val update = latestPointer.getAndSet(null)
+            pointerDispatchScheduled.set(false)
+            update?.let { handleCommand(it.command, it.hands) }
+            // Close the race where another frame arrived while the scheduled
+            // flag was being cleared.
+            if (latestPointer.get() != null) dispatchLatestPointer()
+        }
     }
 
     private fun handleCommand(command: AuraCommand, hands: List<HandFrame>) {
@@ -226,7 +257,7 @@ class AuraCameraService : LifecycleService() {
                 service?.hidePointer()
                 publishStatus("PAUSED · OPEN PALM")
             }
-            AuraCommand.NoOp -> Unit
+            AuraCommand.NoOp -> return
         }
         listener?.invoke(currentStatus, hands)
     }
