@@ -94,7 +94,7 @@ class GestureEngineTest {
 
     @Test fun fistArmsCommandModeAndLeftVSwipeMeansBack() {
         val engine = GestureEngine()
-        assertEquals(AuraCommand.NoOp, engine.process(listOf(fistHand()), 100L))
+        assertEquals(AuraCommand.CommandModeArming, engine.process(listOf(fistHand()), 100L))
         assertEquals(AuraCommand.CommandModeEntered, engine.process(listOf(fistHand()), 1_000L))
         assertEquals(AuraCommand.NoOp, engine.process(listOf(vSign(0.6f)), 1_033L))
         assertEquals(AuraCommand.System(SystemAction.BACK), engine.process(listOf(vSign(0.25f)), 1_066L))
