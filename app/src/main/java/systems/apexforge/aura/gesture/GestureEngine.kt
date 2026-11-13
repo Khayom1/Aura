@@ -141,7 +141,7 @@ class GestureEngine(
                 previousDualDistance = distance
                 previousDualPoints = pointA to pointB
                 dualPinchFrames++
-                if (dualPinchFrames >= 3) suppressSinglePinch = true
+                suppressSinglePinch = true
                 clearSinglePinch()
                 if (dualPinchFrames < 3 || previousDistance == null || previousPoints == null || previousDistance <= 0.001f) {
                     return AuraCommand.NoOp
