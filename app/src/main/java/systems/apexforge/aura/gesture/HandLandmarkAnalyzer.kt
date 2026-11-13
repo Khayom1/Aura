@@ -67,7 +67,7 @@ class HandLandmarkAnalyzer(
                     confidence = (category?.score() ?: 0f).coerceIn(0f, 1f),
                     handedness = side
                 )
-            }
+            }.filter { it.confidence >= 0.88f }
             onHands(hands, timestamp)
             oriented.recycle()
         } catch (failure: Exception) {
