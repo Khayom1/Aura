@@ -33,7 +33,7 @@ System actions use Android AccessibilityService global actions and work only whi
 
 ## Performance safeguards
 - The model processes at most one hand.
-- CameraX uses `STRATEGY_KEEP_ONLY_LATEST`, so slow inference never builds a queue of old frames.
+- CameraX uses its native YUV_420_888 stream and `STRATEGY_KEEP_ONLY_LATEST`, so no intermediate RGBA conversion is requested and slow inference never builds a queue of old frames.
 - Per-frame Bitmap allocation and Matrix-based rotation/mirroring are removed.
 - The GPU delegate is created and used on the same single-thread analysis executor; incompatible devices fall back to CPU.
 - The cursor caches physical display metrics and skips updates that do not move at least one pixel.
@@ -52,7 +52,7 @@ System actions use Android AccessibilityService global actions and work only whi
 - Native Kotlin Android app and CameraX front-camera pipeline.
 - MediaPipe Hand Landmarker in VIDEO mode with one-hand detection.
 - GPU acceleration with safe CPU fallback.
-- CameraX RGBA frame wrapped directly in MediaPipe's MPImage; sensor rotation is passed through ImageProcessingOptions.
+- CameraX YUV_420_888 frame wrapped directly in MediaPipe's MPImage; sensor rotation is passed through ImageProcessingOptions.
 - Single-hand skeleton HUD overlay and floating cursor.
 - Android single-pointer touch injection and global Back, Home, Recents, Notifications and Quick Settings actions.
 - Lifecycle-aware foreground camera service.
