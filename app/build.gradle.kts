@@ -1,7 +1,11 @@
+import java.net.URL
+import java.io.File
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
+
 android {
     namespace = "systems.apexforge.aura"
     compileSdk = 35
@@ -9,8 +13,8 @@ android {
         applicationId = "systems.apexforge.aura"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     compileOptions {
@@ -18,7 +22,31 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
+    sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("generated/auraAssets"))
 }
+
+val handModel = layout.buildDirectory.file("generated/auraAssets/hand_landmarker.task")
+val downloadHandModel by tasks.registering {
+    outputs.file(handModel)
+    doLast {
+        val target = handModel.get().asFile
+        if (!target.exists() || target.length() != 7_819_105L) {
+            target.parentFile.mkdirs()
+            val temp = File(target.parentFile, "hand_landmarker.task.download")
+            val connection = URL("https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task").openConnection()
+            connection.connectTimeout = 20_000
+            connection.readTimeout = 90_000
+            connection.getInputStream().use { input -> temp.outputStream().use { output -> input.copyTo(output) } }
+            check(temp.length() == 7_819_105L) {
+                "Hand Landmarker model size mismatch; refusing to package an incomplete or unexpected model."
+            }
+            if (target.exists()) target.delete()
+            check(temp.renameTo(target)) { "Could not atomically place Hand Landmarker model." }
+        }
+    }
+}
+tasks.named("preBuild").configure { dependsOn(downloadHandModel) }
+
 dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.appcompat:appcompat:1.7.0")
