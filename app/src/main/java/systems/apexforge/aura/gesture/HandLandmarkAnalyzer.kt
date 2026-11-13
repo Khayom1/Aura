@@ -62,8 +62,8 @@ class HandLandmarkAnalyzer(
             val hands = result.landmarks().mapIndexed { index, points ->
                 val category = categories.getOrNull(index)?.firstOrNull()
                 val side = when (category?.categoryName()?.lowercase()) {
-                    "left" -> Handedness.LEFT
-                    "right" -> Handedness.RIGHT
+                    "left" -> Handedness.RIGHT
+                    "right" -> Handedness.LEFT
                     else -> Handedness.UNKNOWN
                 }
                 HandFrame(
