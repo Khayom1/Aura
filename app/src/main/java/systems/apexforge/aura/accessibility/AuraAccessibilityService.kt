@@ -63,7 +63,9 @@ class AuraAccessibilityService : AccessibilityService() {
             .coerceIn(0, (cachedMetrics.widthPixels - size).coerceAtLeast(0))
         val y = (normalizedY * cachedMetrics.heightPixels - size / 2f).roundToInt()
             .coerceIn(0, (cachedMetrics.heightPixels - size).coerceAtLeast(0))
-        if (abs(x - lastCursorX) < 1 && abs(y - lastCursorY) < 1) return
+        if (lastCursorX != Int.MIN_VALUE && lastCursorY != Int.MIN_VALUE &&
+            abs(x - lastCursorX) < 1 && abs(y - lastCursorY) < 1
+        ) return
         params.x = x
         params.y = y
         try {
