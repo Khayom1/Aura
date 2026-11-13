@@ -1,19 +1,26 @@
 package systems.apexforge.aura.gesture
 
-import android.graphics.Bitmap
-import android.graphics.Matrix
+import android.media.Image
+import android.os.SystemClock
 import android.util.Log
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
-import com.google.mediapipe.framework.image.BitmapImageBuilder
+import com.google.mediapipe.framework.image.MediaImageBuilder
+import com.google.mediapipe.framework.image.MPImage
 import com.google.mediapipe.tasks.core.BaseOptions
+import com.google.mediapipe.tasks.core.Delegate
+import com.google.mediapipe.tasks.vision.core.ImageProcessingOptions
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 /**
- * CameraX -> MediaPipe live video inference. Images are transformed to the
- * front-preview orientation, processed locally, then released immediately.
+ * CameraX RGBA frame -> MediaPipe MPImage -> one-hand landmarks.
+ *
+ * No per-frame Bitmap allocation, app-side Matrix rotation, or mirrored Bitmap
+ * copy. Rotation is passed as image metadata. The landmarker is created lazily
+ * on the analyzer thread so the GPU delegate is initialized and used there.
  */
 class HandLandmarkAnalyzer(
     context: android.content.Context,
@@ -21,85 +28,140 @@ class HandLandmarkAnalyzer(
     private val onError: (String) -> Unit
 ) : ImageAnalysis.Analyzer, AutoCloseable {
 
+    private val appContext = context.applicationContext
     private val closed = AtomicBoolean(false)
     private var lastTimestampMs = 0L
-    private val landmarker: HandLandmarker = run {
-        val options = HandLandmarker.HandLandmarkerOptions.builder()
-            .setBaseOptions(BaseOptions.builder().setModelAssetPath("hand_landmarker.task").build())
-            .setRunningMode(RunningMode.VIDEO)
-            .setNumHands(2)
-            .setMinHandDetectionConfidence(0.65f)
-            .setMinHandPresenceConfidence(0.65f)
-            .setMinTrackingConfidence(0.65f)
+    private var landmarker: HandLandmarker? = null
+    private var activeDelegate: Delegate? = null
+    private var cachedRotation = Int.MIN_VALUE
+    private var cachedProcessingOptions: ImageProcessingOptions? = null
+
+    private fun createLandmarker(delegate: Delegate): HandLandmarker {
+        val baseOptions = BaseOptions.builder()
+            .setModelAssetPath(MODEL_ASSET)
+            .setDelegate(delegate)
             .build()
-        HandLandmarker.createFromOptions(
-            context.applicationContext,
-            options
-        )
+        val options = HandLandmarker.HandLandmarkerOptions.builder()
+            .setBaseOptions(baseOptions)
+            .setRunningMode(RunningMode.VIDEO)
+            .setNumHands(1)
+            .setMinHandDetectionConfidence(0.60f)
+            .setMinHandPresenceConfidence(0.60f)
+            .setMinTrackingConfidence(0.60f)
+            .build()
+        return HandLandmarker.createFromOptions(appContext, options)
+    }
+
+    private fun getOrCreateLandmarker(): HandLandmarker {
+        landmarker?.let { return it }
+        return try {
+            createLandmarker(Delegate.GPU).also {
+                landmarker = it
+                activeDelegate = Delegate.GPU
+                Log.i(TAG, "Hand Landmarker initialized with GPU delegate")
+            }
+        } catch (gpuFailure: Exception) {
+            Log.w(TAG, "GPU delegate unavailable; falling back to CPU", gpuFailure)
+            createLandmarker(Delegate.CPU).also {
+                landmarker = it
+                activeDelegate = Delegate.CPU
+                Log.i(TAG, "Hand Landmarker initialized with CPU delegate")
+            }
+        }
+    }
+
+    private fun processingOptions(rotationDegrees: Int): ImageProcessingOptions {
+        if (cachedProcessingOptions == null || cachedRotation != rotationDegrees) {
+            cachedProcessingOptions = ImageProcessingOptions.builder()
+                .setRotationDegrees(rotationDegrees)
+                .build()
+            cachedRotation = rotationDegrees
+        }
+        return cachedProcessingOptions!!
     }
 
     @Synchronized
-    override fun analyze(image: ImageProxy) {
+    override fun analyze(imageProxy: ImageProxy) {
         if (closed.get()) {
-            image.close()
+            imageProxy.close()
             return
         }
-        var bitmapToRecycle: Bitmap? = null
+
+        var mpImage: MPImage? = null
+        val startedAt = SystemClock.elapsedRealtime()
         try {
-            val source = image.toBitmap()
-            bitmapToRecycle = source
-            val matrix = Matrix().apply {
-                postRotate(image.imageInfo.rotationDegrees.toFloat())
-                postScale(-1f, 1f)
-            }
-            val oriented = Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
-            if (oriented !== source) source.recycle()
-            bitmapToRecycle = oriented
-            val timestamp = (image.imageInfo.timestamp / 1_000_000L).coerceAtLeast(lastTimestampMs + 1L)
+            val mediaImage: Image = imageProxy.image
+                ?: throw IllegalStateException("CameraX returned no media image")
+            // The service requests CameraX OUTPUT_IMAGE_FORMAT_RGBA_8888.
+            // Wrap the camera image directly and keep it alive until inference ends.
+            mpImage = MediaImageBuilder(mediaImage).build()
+
+            val timestamp = (imageProxy.imageInfo.timestamp / 1_000_000L)
+                .coerceAtLeast(lastTimestampMs + 1L)
             lastTimestampMs = timestamp
-            val result = landmarker.detectForVideo(BitmapImageBuilder(oriented).build(), timestamp)
-            val categories = result.handedness()
-            val hands = result.landmarks().mapIndexed { index, points ->
-                val category = categories.getOrNull(index)?.firstOrNull()
-                // The input bitmap is explicitly mirrored above. MediaPipe's
-                // handedness labels assume mirrored selfie input, so do not
-                // invert the returned side a second time.
-                val side = when (category?.categoryName()?.lowercase()) {
-                    "left" -> Handedness.LEFT
-                    "right" -> Handedness.RIGHT
-                    else -> Handedness.UNKNOWN
-                }
-                // HandLandmarker exposes handedness classification scores here,
-                // not hand-detection confidence. Detection has already passed
-                // the configured 0.65 detector/presence/tracking thresholds.
-                // Keep a detected 21-point hand valid even when side classification
-                // is uncertain; gesture recognition does not depend on left/right.
-                HandFrame(
-                    landmarks = points.map { Landmark(it.x(), it.y()) },
-                    confidence = if (points.size >= 21) 1f else 0f,
-                    handedness = side
+
+            val options = processingOptions(imageProxy.imageInfo.rotationDegrees)
+            var detector = getOrCreateLandmarker()
+            val result = try {
+                detector.detectForVideo(mpImage, options, timestamp)
+            } catch (gpuFailure: RuntimeException) {
+                if (activeDelegate != Delegate.GPU) throw gpuFailure
+                Log.w(TAG, "GPU inference failed; switching to CPU", gpuFailure)
+                runCatching { detector.close() }
+                landmarker = createLandmarker(Delegate.CPU)
+                activeDelegate = Delegate.CPU
+                detector = landmarker!!
+                detector.detectForVideo(mpImage, options, timestamp)
+            }
+
+            val points = result.landmarks().firstOrNull()
+            val hands = if (points != null && points.size >= 21) {
+                // PreviewView mirrors its front-camera preview for the user.
+                // Analysis is not mirrored, so mirror normalized X coordinates
+                // rather than creating a second transformed pixel buffer.
+                listOf(
+                    HandFrame(
+                        landmarks = points.map { point ->
+                            Landmark(
+                                x = (1f - point.x()).coerceIn(0f, 1f),
+                                y = point.y().coerceIn(0f, 1f)
+                            )
+                        },
+                        confidence = 1f,
+                        handedness = Handedness.UNKNOWN
+                    )
                 )
+            } else {
+                emptyList()
             }
             onHands(hands, timestamp)
+
+            val elapsed = SystemClock.elapsedRealtime() - startedAt
+            if (frameCounter.incrementAndGet() % 60 == 0L) {
+                Log.d(TAG, "Frames=${frameCounter.get()} frameTime=${elapsed}ms delegate=${activeDelegate}")
+            }
         } catch (failure: Exception) {
             Log.e(TAG, "Hand inference failed", failure)
             onError(failure.javaClass.simpleName + ": " + (failure.message ?: "unknown error"))
         } finally {
-            bitmapToRecycle?.recycle()
-            image.close()
+            mpImage?.close()
+            imageProxy.close()
         }
     }
 
     @Synchronized
     override fun close() {
         if (closed.compareAndSet(false, true)) {
-            try { landmarker.close() } catch (failure: Exception) {
-                Log.w(TAG, "Landmarker close failed", failure)
-            }
+            runCatching { landmarker?.close() }
+                .onFailure { Log.w(TAG, "Landmarker close failed", it) }
+            landmarker = null
+            activeDelegate = null
         }
     }
 
     companion object {
         private const val TAG = "AURA-Landmarker"
+        private const val MODEL_ASSET = "hand_landmarker.task"
+        private val frameCounter = AtomicLong(0L)
     }
 }
