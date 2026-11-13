@@ -53,7 +53,7 @@ class AuraCameraService : LifecycleService() {
     private val latestPointer = AtomicReference<PointerUpdate?>(null)
     private val pointerDispatchScheduled = AtomicBoolean(false)
     private val lastContinuousCommand = AtomicReference<String?>(null)
-    private var trackingLost = false
+    private val trackingLost = AtomicBoolean(false)
 
     override fun onCreate() {
         super.onCreate()
@@ -107,7 +107,7 @@ class AuraCameraService : LifecycleService() {
         started = false
         latestPointer.set(null)
         lastContinuousCommand.set(null)
-        trackingLost = false
+        trackingLost.set(false)
         cameraProvider?.unbindAll()
         cameraProvider = null
         preview = null
@@ -142,8 +142,19 @@ class AuraCameraService : LifecycleService() {
         val handAnalyzer = HandLandmarkAnalyzer(
             applicationContext,
             onHands = { hands, timestamp ->
-                val command = gestureEngine.process(hands, timestamp)
-                when (command) {
+                val hasConfidentHand = hands.any {
+                    it.confidence >= 0.88f && it.landmarks.size >= 21
+                }
+                if (!hasConfidentHand) {
+                    latestPointer.set(null)
+                    lastContinuousCommand.set(null)
+                    if (trackingLost.compareAndSet(false, true)) {
+                        mainHandler.post { handleTrackingLost() }
+                    }
+                } else {
+                    trackingLost.set(false)
+                    val command = gestureEngine.process(hands, timestamp)
+                    when (command) {
                     is AuraCommand.Pointer -> {
                         lastContinuousCommand.set("POINTER")
                         latestPointer.set(PointerUpdate(command, hands))
@@ -168,6 +179,7 @@ class AuraCameraService : LifecycleService() {
                         // and must never be overwritten by pointer coalescing.
                         mainHandler.post { handleCommand(command, hands) }
                     }
+                }
                 }
             },
             onError = { message ->
