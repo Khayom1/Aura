@@ -1,11 +1,11 @@
 package systems.apexforge.aura.gesture
 
-import android.media.Image
+import android.graphics.Bitmap
 import android.os.SystemClock
 import android.util.Log
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
-import com.google.mediapipe.framework.image.MediaImageBuilder
+import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.framework.image.MPImage
 import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.core.Delegate
@@ -16,11 +16,11 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * CameraX RGBA frame -> MediaPipe MPImage -> one-hand landmarks.
+ * CameraX RGBA frame -> reusable ARGB bitmap -> MediaPipe MPImage.
  *
- * No per-frame Bitmap allocation, app-side Matrix rotation, or mirrored Bitmap
- * copy. Rotation is passed as image metadata. The landmarker is created lazily
- * on the analyzer thread so the GPU delegate is initialized and used there.
+ * The Bitmap is allocated once per stream and reused synchronously. Rotation is
+ * passed as metadata and selfie mirroring is done on normalized landmark X
+ * values, avoiding per-frame Matrix transforms and secondary Bitmap copies.
  */
 class HandLandmarkAnalyzer(
     context: android.content.Context,
@@ -35,6 +35,7 @@ class HandLandmarkAnalyzer(
     private var activeDelegate: Delegate? = null
     private var cachedRotation = Int.MIN_VALUE
     private var cachedProcessingOptions: ImageProcessingOptions? = null
+    private var reusableBitmap: Bitmap? = null
 
     private fun createLandmarker(delegate: Delegate): HandLandmarker {
         val baseOptions = BaseOptions.builder()
@@ -80,6 +81,18 @@ class HandLandmarkAnalyzer(
         return cachedProcessingOptions!!
     }
 
+    private fun getOrCreateBitmap(width: Int, height: Int): Bitmap {
+        reusableBitmap?.let { existing ->
+            if (existing.width == width && existing.height == height && !existing.isRecycled) {
+                return existing
+            }
+            existing.recycle()
+        }
+        return Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also {
+            reusableBitmap = it
+        }
+    }
+
     @Synchronized
     override fun analyze(imageProxy: ImageProxy) {
         if (closed.get()) {
@@ -90,11 +103,16 @@ class HandLandmarkAnalyzer(
         var mpImage: MPImage? = null
         val startedAt = SystemClock.elapsedRealtime()
         try {
-            val mediaImage: Image = imageProxy.image
-                ?: throw IllegalStateException("CameraX returned no media image")
-            // The service requests CameraX OUTPUT_IMAGE_FORMAT_RGBA_8888.
-            // Wrap the camera image directly and keep it alive until inference ends.
-            mpImage = MediaImageBuilder(mediaImage).build()
+            val plane = imageProxy.planes.firstOrNull()
+                ?: throw IllegalStateException("CameraX returned no RGBA image plane")
+            val bitmap = getOrCreateBitmap(imageProxy.width, imageProxy.height)
+            val pixels = plane.buffer
+            pixels.rewind()
+            // CameraX RGBA_8888 is a single packed plane. Copy into the same
+            // bitmap each frame; no Bitmap allocation or full-frame Matrix is
+            // required after the first frame.
+            bitmap.copyPixelsFromBuffer(pixels)
+            mpImage = BitmapImageBuilder(bitmap).build()
 
             val timestamp = (imageProxy.imageInfo.timestamp / 1_000_000L)
                 .coerceAtLeast(lastTimestampMs + 1L)
@@ -116,9 +134,8 @@ class HandLandmarkAnalyzer(
 
             val points = result.landmarks().firstOrNull()
             val hands = if (points != null && points.size >= 21) {
-                // PreviewView mirrors its front-camera preview for the user.
-                // Analysis is not mirrored, so mirror normalized X coordinates
-                // rather than creating a second transformed pixel buffer.
+                // The preview mirrors its front-camera view for the user.
+                // Mirror normalized X coordinates, not the source pixel buffer.
                 listOf(
                     HandFrame(
                         landmarks = points.map { point ->
@@ -156,6 +173,8 @@ class HandLandmarkAnalyzer(
                 .onFailure { Log.w(TAG, "Landmarker close failed", it) }
             landmarker = null
             activeDelegate = null
+            reusableBitmap?.recycle()
+            reusableBitmap = null
         }
     }
 
