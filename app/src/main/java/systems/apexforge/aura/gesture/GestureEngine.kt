@@ -21,6 +21,7 @@ sealed interface AuraCommand {
     ) : AuraCommand
     data class System(val action: SystemAction) : AuraCommand
     data object CommandModeEntered : AuraCommand
+    data object CommandModeArming : AuraCommand
     data object Pause : AuraCommand
     data object NoOp : AuraCommand
 }
@@ -80,7 +81,7 @@ class GestureEngine(
                 commandMode = false
                 commandAnchor = null
                 fistStartedAt = 0L
-                return AuraCommand.NoOp
+                return AuraCommand.Pause
             }
             if (valid.size == 1 && isOpenPalm(valid.first())) {
                 commandMode = false
@@ -111,7 +112,7 @@ class GestureEngine(
                         }
                     )
                 }
-                return AuraCommand.NoOp
+                return AuraCommand.CommandModeArming
             }
             commandAnchor = null
             return AuraCommand.NoOp
@@ -127,9 +128,12 @@ class GestureEngine(
                 clearInteraction()
                 return AuraCommand.CommandModeEntered
             }
-            return AuraCommand.NoOp
+            return AuraCommand.CommandModeArming
         }
-        fistStartedAt = 0L
+        if (fistStartedAt > 0L) {
+            fistStartedAt = 0L
+            return AuraCommand.Pause
+        }
 
         if (valid.size == 2) {
             val a = valid[0]
