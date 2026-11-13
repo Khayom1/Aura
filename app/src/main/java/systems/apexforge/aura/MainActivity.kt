@@ -177,7 +177,8 @@ class MainActivity : AppCompatActivity() {
     private fun stopSessionService() {
         auraService?.setUiListener(null)
         auraService?.detachPreview()
-        auraService?.stopSession()
+        if (auraService != null) auraService?.stopSession()
+        else stopService(Intent(this, AuraCameraService::class.java))
         if (serviceBound) {
             try { unbindService(serviceConnection) } catch (_: IllegalArgumentException) { }
             serviceBound = false
