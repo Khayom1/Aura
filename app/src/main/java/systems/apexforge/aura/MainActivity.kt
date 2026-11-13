@@ -21,6 +21,7 @@ import systems.apexforge.aura.accessibility.AuraAccessibilityService
 import systems.apexforge.aura.gesture.AuraCommand
 import systems.apexforge.aura.gesture.GestureEngine
 import systems.apexforge.aura.gesture.HandLandmarkAnalyzer
+import systems.apexforge.aura.gesture.SystemAction
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -147,6 +148,16 @@ class MainActivity : AppCompatActivity() {
             is AuraCommand.Swipe -> {
                 if (service == null) status.text = "DRAG · ACCESSIBILITY REQUIRED"
                 else status.text = if (service.swipeNormalized(command.x1, command.y1, command.x2, command.y2, command.durationMs)) "DRAG" else "ACTION BUSY"
+            }
+            is AuraCommand.System -> {
+                service?.hidePointer()
+                status.text = if (service?.performSystemAction(command.action) == true) {
+                    "SYSTEM · " + command.action.name
+                } else "SYSTEM ACTION UNAVAILABLE"
+            }
+            AuraCommand.CommandModeEntered -> {
+                service?.hidePointer()
+                status.text = "COMMAND MODE · V-SWIPE: BACK / HOME / RECENTS / PANELS"
             }
             is AuraCommand.Zoom -> {
                 val now = android.os.SystemClock.uptimeMillis()
