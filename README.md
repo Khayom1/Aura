@@ -1,5 +1,7 @@
 # AURA
 
+**Current version: 0.4.0** — single-hand control with reduced frame processing overhead and live performance diagnostics.
+
 **A Stark-inspired native Android hands-free control system** for the Samsung Galaxy A35 5G.
 
 AURA is an Android application, not a website. It uses the front camera and on-device MediaPipe hand tracking to control Android through a user-enabled Accessibility service.
@@ -39,6 +41,7 @@ Read [docs/INTERACTION_CONTRACT.md](docs/INTERACTION_CONTRACT.md) for the full i
 - RGBA camera frames are wrapped directly as MediaPipe images; the app no longer creates, rotates and mirrors a new Bitmap for every frame.
 - Camera analysis is reduced to 480 × 360; the preview uses hardware-backed rendering.
 - Cursor display metrics are cached and repeated sub-pixel overlay updates are skipped.
+- The in-app status displays measured analysis FPS, average model inference latency and the active GPU/CPU delegate after warm-up.
 
 ## Build and CI
 
