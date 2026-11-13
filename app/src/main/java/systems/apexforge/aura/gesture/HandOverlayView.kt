@@ -6,9 +6,10 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.view.View
 
-/** Lightweight local HUD overlay for the detected hand skeletons. */
+/** Lightweight single-hand landmark HUD overlay. */
 class HandOverlayView(context: Context) : View(context) {
-    @Volatile private var hands: List<HandFrame> = emptyList()
+    @Volatile private var hand: HandFrame? = null
+
     private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.rgb(66, 217, 255)
         style = Paint.Style.STROKE
@@ -24,6 +25,11 @@ class HandOverlayView(context: Context) : View(context) {
         color = Color.rgb(66, 217, 255)
         style = Paint.Style.FILL
     }
+    private val label = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.rgb(66, 217, 255)
+        textSize = 11f * resources.displayMetrics.scaledDensity
+        typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.BOLD)
+    }
     private val connections = arrayOf(
         0 to 1, 1 to 2, 2 to 3, 3 to 4,
         0 to 5, 5 to 6, 6 to 7, 7 to 8,
@@ -34,41 +40,32 @@ class HandOverlayView(context: Context) : View(context) {
     )
 
     fun updateHands(value: List<HandFrame>) {
-        hands = value
+        hand = value.firstOrNull()
         postInvalidateOnAnimation()
     }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        val snapshot = hands
+        val snapshot = hand ?: return
+        val pts = snapshot.landmarks
+        if (pts.size < 21) return
         val radius = 3.2f * resources.displayMetrics.density
-        snapshot.forEachIndexed { handIndex, hand ->
-            val pts = hand.landmarks
-            if (pts.size < 21) return@forEachIndexed
-            connections.forEach { (a, b) ->
-                canvas.drawLine(
-                    pts[a].x * width, pts[a].y * height,
-                    pts[b].x * width, pts[b].y * height,
-                    line
-                )
-            }
-            pts.forEachIndexed { index, point ->
-                canvas.drawCircle(
-                    point.x * width, point.y * height,
-                    if (index == 8 || index == 4) radius * 1.55f else radius,
-                    if (index == 8 || index == 4) accent else joint
-                )
-            }
-            val wrist = pts[0]
-            val label = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.rgb(66, 217, 255)
-                textSize = 11f * resources.displayMetrics.scaledDensity
-                typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.BOLD)
-            }
-            canvas.drawText(
-                if (hand.handedness == Handedness.UNKNOWN) "HAND ${handIndex + 1}" else hand.handedness.name,
-                wrist.x * width + 10f, wrist.y * height - 10f, label
+
+        connections.forEach { (a, b) ->
+            canvas.drawLine(
+                pts[a].x * width, pts[a].y * height,
+                pts[b].x * width, pts[b].y * height,
+                line
             )
         }
+        pts.forEachIndexed { index, point ->
+            canvas.drawCircle(
+                point.x * width, point.y * height,
+                if (index == 8 || index == 4) radius * 1.55f else radius,
+                if (index == 8 || index == 4) accent else joint
+            )
+        }
+        val wrist = pts[0]
+        canvas.drawText("HAND", wrist.x * width + 10f, wrist.y * height - 10f, label)
     }
 }
