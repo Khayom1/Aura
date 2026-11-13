@@ -247,19 +247,16 @@ class AuraCameraService : LifecycleService() {
         }
     }
 
-    private fun handleCommand(command: AuraCommand, hands: List<HandFrame>) {
+    private fun handleTrackingLost() {
         if (!started) return
+        AuraAccessibilityService.activeInstance?.hidePointer()
+        publishStatus("NO CONFIDENT HAND · SAFE IDLE")
+        listener?.invoke(currentStatus, emptyList())
+    }
+
+    private fun handleCommand(command: AuraCommand, hands: List<HandFrame>) {
+        if (!started || hands.none { it.confidence >= 0.88f && it.landmarks.size >= 21 }) return
         val service = AuraAccessibilityService.activeInstance
-        if (hands.isEmpty() || hands.none { it.confidence >= 0.88f }) {
-            if (!trackingLost) {
-                trackingLost = true
-                service?.hidePointer()
-                publishStatus("NO CONFIDENT HAND · SAFE IDLE")
-                listener?.invoke(currentStatus, emptyList())
-            }
-            return
-        }
-        trackingLost = false
         when (command) {
             is AuraCommand.Pointer -> {
                 service?.showPointer(command.x, command.y)
