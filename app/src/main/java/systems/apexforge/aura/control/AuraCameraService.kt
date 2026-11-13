@@ -308,6 +308,7 @@ class AuraCameraService : LifecycleService() {
     }
 
     @Volatile private var currentStatus = "AURA STARTING"
+    @Volatile private var performanceText = "WARMING UP"
 
     private fun publishStatus(value: String) {
         if (currentStatus == value) return
