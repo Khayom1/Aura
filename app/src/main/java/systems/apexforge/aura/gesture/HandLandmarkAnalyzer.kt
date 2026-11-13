@@ -14,6 +14,7 @@ import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+import java.util.Locale
 
 /**
  * CameraX RGBA frame -> reusable ARGB bitmap -> MediaPipe MPImage.
@@ -25,7 +26,8 @@ import java.util.concurrent.atomic.AtomicLong
 class HandLandmarkAnalyzer(
     context: android.content.Context,
     private val onHands: (List<HandFrame>, Long) -> Unit,
-    private val onError: (String) -> Unit
+    private val onError: (String) -> Unit,
+    private val onMetrics: (String) -> Unit
 ) : ImageAnalysis.Analyzer, AutoCloseable {
 
     private val appContext = context.applicationContext
@@ -36,6 +38,10 @@ class HandLandmarkAnalyzer(
     private var cachedRotation = Int.MIN_VALUE
     private var cachedProcessingOptions: ImageProcessingOptions? = null
     private var reusableBitmap: Bitmap? = null
+    private var warmupFramesRemaining = 8
+    private var metricWindowStartMs = 0L
+    private var metricFrames = 0
+    private var totalInferenceMs = 0L
 
     private fun createLandmarker(delegate: Delegate): HandLandmarker {
         val baseOptions = BaseOptions.builder()
@@ -120,6 +126,7 @@ class HandLandmarkAnalyzer(
 
             val options = processingOptions(imageProxy.imageInfo.rotationDegrees)
             var detector = getOrCreateLandmarker()
+            val inferenceStartedAt = SystemClock.elapsedRealtime()
             val result = try {
                 detector.detectForVideo(mpImage, options, timestamp)
             } catch (gpuFailure: RuntimeException) {
@@ -131,6 +138,8 @@ class HandLandmarkAnalyzer(
                 detector = landmarker!!
                 detector.detectForVideo(mpImage, options, timestamp)
             }
+            val inferenceMs = (SystemClock.elapsedRealtime() - inferenceStartedAt).coerceAtLeast(0L)
+            updatePerformanceMetrics(inferenceMs)
 
             val points = result.landmarks().firstOrNull()
             val hands = if (points != null && points.size >= 21) {
@@ -166,6 +175,33 @@ class HandLandmarkAnalyzer(
         }
     }
 
+    private fun updatePerformanceMetrics(inferenceMs: Long) {
+        if (warmupFramesRemaining > 0) {
+            warmupFramesRemaining--
+            return
+        }
+        val now = SystemClock.elapsedRealtime()
+        if (metricWindowStartMs == 0L) metricWindowStartMs = now
+        metricFrames++
+        totalInferenceMs += inferenceMs
+        if (metricFrames < 30) return
+
+        val elapsedMs = (now - metricWindowStartMs).coerceAtLeast(1L)
+        val fps = metricFrames * 1000f / elapsedMs
+        val averageInferenceMs = totalInferenceMs.toFloat() / metricFrames
+        val metrics = String.format(
+            Locale.US,
+            "%.0f FPS · %.0f ms · %s",
+            fps,
+            averageInferenceMs,
+            activeDelegate?.name ?: "UNKNOWN"
+        )
+        onMetrics(metrics)
+        metricWindowStartMs = now
+        metricFrames = 0
+        totalInferenceMs = 0L
+    }
+
     @Synchronized
     override fun close() {
         if (closed.compareAndSet(false, true)) {
@@ -175,6 +211,9 @@ class HandLandmarkAnalyzer(
             activeDelegate = null
             reusableBitmap?.recycle()
             reusableBitmap = null
+            metricWindowStartMs = 0L
+            metricFrames = 0
+            totalInferenceMs = 0L
         }
     }
 
