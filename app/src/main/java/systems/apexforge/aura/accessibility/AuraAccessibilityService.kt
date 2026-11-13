@@ -50,10 +50,11 @@ class AuraAccessibilityService : AccessibilityService() {
             } catch (_: Exception) { return }
         }
         val params = cursorParams ?: return
+        val pointerView = cursor ?: return
         val metrics = resources.displayMetrics
         params.x = (normalizedX * metrics.widthPixels - size / 2f).roundToInt().coerceIn(0, metrics.widthPixels - size)
         params.y = (normalizedY * metrics.heightPixels - size / 2f).roundToInt().coerceIn(0, metrics.heightPixels - size)
-        try { wm.updateViewLayout(cursor, params) } catch (_: Exception) { }
+        try { wm.updateViewLayout(pointerView, params) } catch (_: Exception) { }
     }
 
     fun hidePointer() {
