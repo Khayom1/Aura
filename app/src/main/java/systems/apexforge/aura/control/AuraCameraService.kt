@@ -108,6 +108,7 @@ class AuraCameraService : LifecycleService() {
             executor.shutdown()
             Log.e(TAG, "Could not initialize hand model", failure)
             publishStatus("MODEL INIT ERROR · " + failure.javaClass.simpleName)
+            listener?.invoke(currentStatus, emptyList())
             stopSelf()
             return
         }
@@ -203,6 +204,7 @@ class AuraCameraService : LifecycleService() {
     @Volatile private var currentStatus = "AURA STARTING"
 
     private fun publishStatus(value: String) {
+        if (currentStatus == value) return
         currentStatus = value
         val notification = buildNotification(value)
         getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification)
