@@ -8,7 +8,7 @@ plugins {
 
 android {
     namespace = "systems.apexforge.aura"
-    compileSdk = 35
+    compileSdk = 36
     defaultConfig {
         applicationId = "systems.apexforge.aura"
         minSdk = 26
