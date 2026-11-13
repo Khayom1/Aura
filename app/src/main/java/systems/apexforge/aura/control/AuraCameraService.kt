@@ -122,7 +122,7 @@ class AuraCameraService : LifecycleService() {
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
             try {
-                if (isDestroyed || !isRunning) {
+                if (!isRunning) {
                     handAnalyzer.close()
                     executor.shutdown()
                     return@addListener
