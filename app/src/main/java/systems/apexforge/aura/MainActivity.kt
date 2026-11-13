@@ -1,10 +1,15 @@
 package systems.apexforge.aura
 
 import android.Manifest
+import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
+import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
+import android.os.IBinder
 import android.provider.Settings
 import android.widget.Button
 import android.widget.FrameLayout
@@ -12,40 +17,68 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.Preview
-import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
-import systems.apexforge.aura.accessibility.AuraAccessibilityService
-import systems.apexforge.aura.gesture.AuraCommand
-import systems.apexforge.aura.gesture.GestureEngine
-import systems.apexforge.aura.gesture.HandLandmarkAnalyzer
+import systems.apexforge.aura.control.AuraCameraService
+import systems.apexforge.aura.gesture.HandFrame
 import systems.apexforge.aura.gesture.HandOverlayView
-import systems.apexforge.aura.gesture.SystemAction
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
     private lateinit var previewView: PreviewView
     private lateinit var handOverlay: HandOverlayView
     private lateinit var status: TextView
     private lateinit var sessionButton: Button
-    private var cameraProvider: ProcessCameraProvider? = null
-    private var analyzer: HandLandmarkAnalyzer? = null
-    private var analysisExecutor: ExecutorService? = null
-    private val gestureEngine = GestureEngine()
-    private var sessionActive = false
-    private var lastInjectedAt = 0L
+    private var auraService: AuraCameraService? = null
+    private var serviceBound = false
 
-    private val cameraPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) startCamera() else status.text = "CAMERA PERMISSION REQUIRED"
+    private val cameraPermission = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) requestNotificationPermissionAndStart()
+        else status.text = "CAMERA PERMISSION REQUIRED"
+    }
+
+    private val notificationPermission = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) {
+        // A denied notification permission does not disable the foreground-service task manager entry.
+        startSessionService()
+    }
+
+    private val serviceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+            val local = binder as? AuraCameraService.LocalBinder ?: return
+            val service = local.service()
+            auraService = service
+            service.setUiListener { message, hands ->
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        status.text = message
+                        handOverlay.updateHands(hands)
+                        sessionButton.text = if (AuraCameraService.isRunning) "STOP SESSION" else "START SESSION"
+                    }
+                }
+            }
+            service.attachPreview(previewView.surfaceProvider)
+            status.text = service.statusText()
+            sessionButton.text = "STOP SESSION"
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            auraService = null
+            sessionButton.text = "START SESSION"
+            status.text = "AURA STOPPED"
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         buildInterface()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        if (AuraCameraService.isRunning) bindAuraService()
     }
 
     private fun buildInterface() {
@@ -55,11 +88,15 @@ class MainActivity : AppCompatActivity() {
             setPadding(24, 36, 24, 24)
         }
         root.addView(TextView(this).apply {
-            text = "A U R A"; textSize = 30f; setTextColor(Color.rgb(66, 217, 255))
+            text = "A U R A"
+            textSize = 30f
+            setTextColor(Color.rgb(66, 217, 255))
         })
         status = TextView(this).apply {
-            text = "SYSTEM STANDBY · HYBRID MODE"; textSize = 12f
-            setTextColor(Color.WHITE); setPadding(0, 8, 0, 18)
+            text = "SYSTEM STANDBY · HYBRID MODE"
+            textSize = 12f
+            setTextColor(Color.WHITE)
+            setPadding(0, 8, 0, 18)
         }
         previewView = PreviewView(this).apply {
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
@@ -80,10 +117,11 @@ class MainActivity : AppCompatActivity() {
         sessionButton = Button(this).apply {
             text = "START SESSION"
             setOnClickListener {
-                if (sessionActive) stopSession()
+                if (AuraCameraService.isRunning) stopSessionService()
                 else if (ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.CAMERA) ==
                     PackageManager.PERMISSION_GRANTED
-                ) startCamera() else cameraPermission.launch(Manifest.permission.CAMERA)
+                ) requestNotificationPermissionAndStart()
+                else cameraPermission.launch(Manifest.permission.CAMERA)
             }
         }
         val accessibilityButton = Button(this).apply {
@@ -93,145 +131,71 @@ class MainActivity : AppCompatActivity() {
         root.addView(status)
         root.addView(sessionButton)
         root.addView(accessibilityButton)
-        root.addView(cameraContainer, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+        root.addView(cameraContainer, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
+        ))
         root.addView(TextView(this).apply {
-            text = "FRONT CAMERA • STRICT SAFETY • ON-DEVICE HAND TRACKING"
-            textSize = 10f; setTextColor(Color.LTGRAY); setPadding(0, 16, 0, 0)
+            text = "FRONT CAMERA • STRICT SAFETY • LOCAL HAND TRACKING"
+            textSize = 10f
+            setTextColor(Color.LTGRAY)
+            setPadding(0, 16, 0, 0)
         })
         setContentView(root)
     }
 
-    private fun startCamera() {
-        if (sessionActive) return
-        val future = ProcessCameraProvider.getInstance(this)
-        future.addListener({
-            val provider = future.get()
-            val preview = Preview.Builder().build().also { it.setSurfaceProvider(previewView.surfaceProvider) }
-            val executor = Executors.newSingleThreadExecutor()
-            val handAnalyzer = try {
-                HandLandmarkAnalyzer(
-                    applicationContext,
-                    onHands = { hands, timestamp ->
-                        val command = gestureEngine.process(hands, timestamp)
-                        runOnUiThread {
-                            handOverlay.updateHands(hands)
-                            handleCommand(command, hands.size)
-                        }
-                    },
-                    onError = { message -> runOnUiThread { status.text = "TRACKING ERROR · $message" } }
-                )
-            } catch (failure: Exception) {
-                executor.shutdown()
-                status.text = "MODEL INIT ERROR · " + failure.javaClass.simpleName
-                return@addListener
-            }
-            val analysis = ImageAnalysis.Builder()
-                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .setTargetResolution(android.util.Size(640, 480))
-                .build()
-                .also { it.setAnalyzer(executor, handAnalyzer) }
-            try {
-                provider.unbindAll()
-                provider.bindToLifecycle(this, CameraSelector.DEFAULT_FRONT_CAMERA, preview, analysis)
-                cameraProvider = provider
-                analyzer = handAnalyzer
-                analysisExecutor = executor
-                sessionActive = true
-                sessionButton.text = "STOP SESSION"
-                status.text = "AURA ACTIVE · SHOW ONE OR TWO HANDS"
-            } catch (failure: Exception) {
-                handAnalyzer.close()
-                executor.shutdown()
-                status.text = "CAMERA ERROR · " + failure.javaClass.simpleName
-            }
-        }, ContextCompat.getMainExecutor(this))
+    private fun requestNotificationPermissionAndStart() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else startSessionService()
     }
 
-    private fun handleCommand(command: AuraCommand, handCount: Int) {
-        if (!sessionActive) return
-        val service = AuraAccessibilityService.activeInstance
-        if (handCount == 0) {
-            handOverlay.updateHands(emptyList())
-            service?.hidePointer()
-            status.text = "NO HANDS · SAFE IDLE"
-            return
-        }
-        when (command) {
-            is AuraCommand.Pointer -> {
-                service?.showPointer(command.x, command.y)
-                status.text = if (service == null) "HANDS FOUND · ENABLE AURA ACCESSIBILITY" else "TRACKING · $handCount HAND"
-            }
-            is AuraCommand.Tap -> {
-                if (service == null) status.text = "PINCH CLICK · ACCESSIBILITY REQUIRED"
-                else status.text = if (service.tapNormalized(command.x, command.y)) "SELECT" else "ACTION BUSY"
-            }
-            is AuraCommand.LongPress -> {
-                if (service == null) status.text = "LONG PRESS · ACCESSIBILITY REQUIRED"
-                else status.text = if (service.longPressNormalized(command.x, command.y)) "LONG PRESS" else "ACTION BUSY"
-            }
-            is AuraCommand.Swipe -> {
-                if (service == null) status.text = "DRAG · ACCESSIBILITY REQUIRED"
-                else status.text = if (service.swipeNormalized(command.x1, command.y1, command.x2, command.y2, command.durationMs)) "DRAG" else "ACTION BUSY"
-            }
-            is AuraCommand.System -> {
-                service?.hidePointer()
-                status.text = if (service?.performSystemAction(command.action) == true) {
-                    "SYSTEM · " + command.action.name
-                } else "SYSTEM ACTION UNAVAILABLE"
-            }
-            AuraCommand.CommandModeEntered -> {
-                service?.hidePointer()
-                status.text = "COMMAND MODE · V-SWIPE: BACK / HOME / RECENTS / PANELS"
-            }
-            is AuraCommand.Zoom -> {
-                service?.hidePointer()
-                val now = android.os.SystemClock.uptimeMillis()
-                if (service != null && now - lastInjectedAt >= 125L) {
-                    lastInjectedAt = now
-                    val ok = service.pinchNormalized(
-                        command.fromA.x, command.fromA.y, command.fromB.x, command.fromB.y,
-                        command.toA.x, command.toA.y, command.toB.x, command.toB.y
-                    )
-                    status.text = if (ok) {
-                        if (command.scaleDelta > 0f) "ZOOM IN" else "ZOOM OUT"
-                    } else "ZOOM · WAITING FOR TOUCH PIPELINE"
-                } else if (service == null) status.text = "TWO-HAND ZOOM · ENABLE ACCESSIBILITY"
-            }
-            AuraCommand.Pause -> {
-                service?.hidePointer()
-                status.text = "PAUSED · OPEN HANDS DETECTED"
-            }
-            AuraCommand.NoOp -> {
-                if (handCount >= 2) service?.hidePointer()
-            }
+    private fun startSessionService() {
+        val intent = Intent(this, AuraCameraService::class.java)
+        try {
+            ContextCompat.startForegroundService(this, intent)
+            bindAuraService()
+            sessionButton.text = "STOP SESSION"
+            status.text = "STARTING AURA · CAMERA INITIALIZING"
+        } catch (failure: Exception) {
+            status.text = "SERVICE START FAILED · " + failure.javaClass.simpleName
+            sessionButton.text = "START SESSION"
         }
     }
 
-    private fun stopSession() {
-        cameraProvider?.unbindAll()
-        cameraProvider = null
-        val oldAnalyzer = analyzer
-        val oldExecutor = analysisExecutor
-        analyzer = null
-        analysisExecutor = null
-        if (oldAnalyzer != null && oldExecutor != null) {
-            oldExecutor.execute { oldAnalyzer.close() }
-            oldExecutor.shutdown()
+    private fun bindAuraService() {
+        if (serviceBound) return
+        serviceBound = bindService(
+            Intent(this, AuraCameraService::class.java),
+            serviceConnection,
+            Context.BIND_AUTO_CREATE
+        )
+    }
+
+    private fun stopSessionService() {
+        auraService?.setUiListener(null)
+        auraService?.detachPreview()
+        auraService?.stopSession()
+        if (serviceBound) {
+            try { unbindService(serviceConnection) } catch (_: IllegalArgumentException) { }
+            serviceBound = false
         }
-        analysisExecutor = null
-        AuraAccessibilityService.activeInstance?.hidePointer()
-        sessionActive = false
+        auraService = null
+        handOverlay.updateHands(emptyList())
         sessionButton.text = "START SESSION"
         status.text = "SYSTEM STANDBY · CAMERA RELEASED"
     }
 
     override fun onStop() {
-        if (sessionActive) stopSession()
+        auraService?.detachPreview()
+        auraService?.setUiListener(null)
+        if (serviceBound) {
+            try { unbindService(serviceConnection) } catch (_: IllegalArgumentException) { }
+            serviceBound = false
+        }
+        auraService = null
         super.onStop()
-    }
-
-    override fun onDestroy() {
-        stopSession()
-        super.onDestroy()
     }
 }
