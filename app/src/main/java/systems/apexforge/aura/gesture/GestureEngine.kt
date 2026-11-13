@@ -112,7 +112,7 @@ class GestureEngine(
                         }
                     )
                 }
-                return AuraCommand.CommandModeArming
+                return AuraCommand.NoOp
             }
             commandAnchor = null
             return AuraCommand.NoOp
