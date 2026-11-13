@@ -62,9 +62,10 @@ class AuraCameraService : LifecycleService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
         if (intent?.action == ACTION_STOP) {
-            stopSelf()
+            stopSession()
             return START_NOT_STICKY
         }
+        isRunning = true
         startForegroundCompat()
         if (!started) startCameraPipeline()
         return START_NOT_STICKY
@@ -85,7 +86,29 @@ class AuraCameraService : LifecycleService() {
     }
 
     fun stopSession() {
+        releaseCameraPipeline()
+        publishStatus("SYSTEM STANDBY · CAMERA RELEASED")
+        listener?.invoke(currentStatus, emptyList())
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_REMOVE)
+        else stopForeground(true)
         stopSelf()
+    }
+
+    private fun releaseCameraPipeline() {
+        started = false
+        cameraProvider?.unbindAll()
+        cameraProvider = null
+        preview = null
+        val oldAnalyzer = analyzer
+        val oldExecutor = analysisExecutor
+        analyzer = null
+        analysisExecutor = null
+        if (oldAnalyzer != null && oldExecutor != null) {
+            oldExecutor.execute { oldAnalyzer.close() }
+            oldExecutor.shutdown()
+        }
+        AuraAccessibilityService.activeInstance?.hidePointer()
+        isRunning = false
     }
 
     private fun startCameraPipeline() {
@@ -261,23 +284,10 @@ class AuraCameraService : LifecycleService() {
     }
 
     override fun onDestroy() {
-        started = false
-        cameraProvider?.unbindAll()
-        cameraProvider = null
-        preview = null
-        val oldAnalyzer = analyzer
-        val oldExecutor = analysisExecutor
-        analyzer = null
-        analysisExecutor = null
-        if (oldAnalyzer != null && oldExecutor != null) {
-            oldExecutor.execute { oldAnalyzer.close() }
-            oldExecutor.shutdown()
-        }
-        AuraAccessibilityService.activeInstance?.hidePointer()
+        releaseCameraPipeline()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_REMOVE)
         else stopForeground(true)
         listener = null
-        isRunning = false
         super.onDestroy()
     }
 
