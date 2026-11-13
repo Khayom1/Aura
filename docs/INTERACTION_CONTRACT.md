@@ -37,6 +37,7 @@ System actions use Android AccessibilityService global actions and work only whi
 - Per-frame Bitmap allocation and Matrix-based rotation/mirroring are removed.
 - The GPU delegate is created and used on the same single-thread analysis executor; incompatible devices fall back to CPU.
 - The cursor caches physical display metrics and skips updates that do not move at least one pixel.
+- After warm-up, the HUD reports measured analyzer FPS, average inference latency and the active delegate in the status line.
 - The HUD stores and draws one hand only and reuses its Paint objects.
 
 ## Strict safety invariants
