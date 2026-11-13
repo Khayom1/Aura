@@ -19,7 +19,6 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleService
-import systems.apexforge.aura.R
 import systems.apexforge.aura.accessibility.AuraAccessibilityService
 import systems.apexforge.aura.gesture.AuraCommand
 import systems.apexforge.aura.gesture.GestureEngine
@@ -128,11 +127,13 @@ class AuraCameraService : LifecycleService() {
                 analysisExecutor = executor
                 started = true
                 publishStatus("AURA ACTIVE · HAND TRACKING READY")
+                listener?.invoke(currentStatus, emptyList())
             } catch (failure: Exception) {
                 Log.e(TAG, "Camera binding failed", failure)
                 handAnalyzer.close()
                 executor.shutdown()
                 publishStatus("CAMERA ERROR · " + failure.javaClass.simpleName)
+                listener?.invoke(currentStatus, emptyList())
                 stopSelf()
             }
         }, ContextCompat.getMainExecutor(this))
@@ -144,7 +145,7 @@ class AuraCameraService : LifecycleService() {
         if (hands.isEmpty()) {
             service?.hidePointer()
             publishStatus("NO HANDS · SAFE IDLE")
-            listener?.invoke("NO HANDS · SAFE IDLE", emptyList())
+            listener?.invoke(currentStatus, emptyList())
             return
         }
         when (command) {
@@ -203,7 +204,6 @@ class AuraCameraService : LifecycleService() {
         currentStatus = value
         val notification = buildNotification(value)
         getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification)
-        listener?.invoke(value, emptyList())
     }
 
     private fun startForegroundCompat() {
@@ -258,6 +258,9 @@ class AuraCameraService : LifecycleService() {
             oldExecutor.shutdown()
         }
         AuraAccessibilityService.activeInstance?.hidePointer()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_REMOVE)
+        else @Suppress("DEPRECATION") stopForeground(true)
+        listener = null
         isRunning = false
         super.onDestroy()
     }
