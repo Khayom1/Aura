@@ -153,9 +153,9 @@ class AuraCameraService : LifecycleService() {
     private fun handleCommand(command: AuraCommand, hands: List<HandFrame>) {
         if (!started) return
         val service = AuraAccessibilityService.activeInstance
-        if (hands.isEmpty()) {
+        if (hands.isEmpty() || hands.none { it.confidence >= 0.88f }) {
             service?.hidePointer()
-            publishStatus("NO HANDS · SAFE IDLE")
+            publishStatus("NO CONFIDENT HANDS · SAFE IDLE")
             listener?.invoke(currentStatus, emptyList())
             return
         }
