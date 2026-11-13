@@ -9,10 +9,11 @@ import android.view.View
 /** Lightweight local HUD overlay for the detected hand skeletons. */
 class HandOverlayView(context: Context) : View(context) {
     @Volatile private var hands: List<HandFrame> = emptyList()
+    private val density = resources.displayMetrics.density
     private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.rgb(66, 217, 255)
         style = Paint.Style.STROKE
-        strokeWidth = 2.4f * resources.displayMetrics.density
+        strokeWidth = 2.4f * density
         alpha = 205
     }
     private val joint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -23,6 +24,14 @@ class HandOverlayView(context: Context) : View(context) {
     private val accent = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.rgb(66, 217, 255)
         style = Paint.Style.FILL
+    }
+    private val label = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.rgb(66, 217, 255)
+        textSize = 11f * resources.displayMetrics.scaledDensity
+        typeface = android.graphics.Typeface.create(
+            "sans-serif-medium",
+            android.graphics.Typeface.BOLD
+        )
     }
     private val connections = arrayOf(
         0 to 1, 1 to 2, 2 to 3, 3 to 4,
@@ -41,7 +50,7 @@ class HandOverlayView(context: Context) : View(context) {
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val snapshot = hands
-        val radius = 3.2f * resources.displayMetrics.density
+        val radius = 3.2f * density
         snapshot.forEachIndexed { handIndex, hand ->
             val pts = hand.landmarks
             if (pts.size < 21) return@forEachIndexed
@@ -60,11 +69,6 @@ class HandOverlayView(context: Context) : View(context) {
                 )
             }
             val wrist = pts[0]
-            val label = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.rgb(66, 217, 255)
-                textSize = 11f * resources.displayMetrics.scaledDensity
-                typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.BOLD)
-            }
             canvas.drawText(
                 if (hand.handedness == Handedness.UNKNOWN) "HAND ${handIndex + 1}" else hand.handedness.name,
                 wrist.x * width + 10f, wrist.y * height - 10f, label
