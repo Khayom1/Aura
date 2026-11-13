@@ -35,6 +35,10 @@ jobs:
           stat -c '%s %n' app/build/generated/auraAssets/hand_landmarker.task
           sha256sum app/build/generated/auraAssets/hand_landmarker.task
           sha256sum app/build/outputs/apk/debug/app-debug.apk
+          if "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions app/build/outputs/apk/debug/app-debug.apk | grep -q "android.permission.INTERNET"; then
+            echo "AURA APK must not request INTERNET permission"
+            exit 1
+          fi
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
