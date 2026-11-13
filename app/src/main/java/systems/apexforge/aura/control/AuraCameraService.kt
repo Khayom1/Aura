@@ -259,7 +259,7 @@ class AuraCameraService : LifecycleService() {
         }
         AuraAccessibilityService.activeInstance?.hidePointer()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_REMOVE)
-        else @Suppress("DEPRECATION") stopForeground(true)
+        else stopForeground(true)
         listener = null
         isRunning = false
         super.onDestroy()
