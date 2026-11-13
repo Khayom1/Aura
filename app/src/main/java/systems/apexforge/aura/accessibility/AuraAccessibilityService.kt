@@ -8,18 +8,23 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PixelFormat
+import android.util.DisplayMetrics
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
+import kotlin.math.abs
 import kotlin.math.roundToInt
 import systems.apexforge.aura.gesture.SystemAction
 
-/** Touch injection and a non-interactive cursor overlay; user must enable this service. */
+/** Single-pointer touch injection and cursor overlay; user must enable this service. */
 class AuraAccessibilityService : AccessibilityService() {
     private var windowManager: WindowManager? = null
     private var cursor: CursorView? = null
     private var cursorParams: WindowManager.LayoutParams? = null
+    private val cachedMetrics = DisplayMetrics()
+    private var lastCursorX = Int.MIN_VALUE
+    private var lastCursorY = Int.MIN_VALUE
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
     override fun onInterrupt() = Unit
@@ -28,6 +33,7 @@ class AuraAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         activeInstance = this
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        refreshDisplayMetrics()
     }
 
     fun showPointer(normalizedX: Float, normalizedY: Float) {
@@ -52,12 +58,19 @@ class AuraAccessibilityService : AccessibilityService() {
         }
         val params = cursorParams ?: return
         val pointerView = cursor ?: return
-        val metrics = realDisplayMetrics()
-        params.x = (normalizedX * metrics.widthPixels - size / 2f).roundToInt()
-            .coerceIn(0, (metrics.widthPixels - size).coerceAtLeast(0))
-        params.y = (normalizedY * metrics.heightPixels - size / 2f).roundToInt()
-            .coerceIn(0, (metrics.heightPixels - size).coerceAtLeast(0))
-        try { wm.updateViewLayout(pointerView, params) } catch (_: Exception) { }
+        if (cachedMetrics.widthPixels <= 0 || cachedMetrics.heightPixels <= 0) refreshDisplayMetrics()
+        val x = (normalizedX * cachedMetrics.widthPixels - size / 2f).roundToInt()
+            .coerceIn(0, (cachedMetrics.widthPixels - size).coerceAtLeast(0))
+        val y = (normalizedY * cachedMetrics.heightPixels - size / 2f).roundToInt()
+            .coerceIn(0, (cachedMetrics.heightPixels - size).coerceAtLeast(0))
+        if (abs(x - lastCursorX) < 1 && abs(y - lastCursorY) < 1) return
+        params.x = x
+        params.y = y
+        try {
+            wm.updateViewLayout(pointerView, params)
+            lastCursorX = x
+            lastCursorY = y
+        } catch (_: Exception) { }
     }
 
     fun hidePointer() {
@@ -65,6 +78,8 @@ class AuraAccessibilityService : AccessibilityService() {
         try { windowManager?.removeView(view) } catch (_: Exception) { }
         cursor = null
         cursorParams = null
+        lastCursorX = Int.MIN_VALUE
+        lastCursorY = Int.MIN_VALUE
     }
 
     fun performSystemAction(action: SystemAction): Boolean {
@@ -101,24 +116,6 @@ class AuraAccessibilityService : AccessibilityService() {
         )
     }
 
-    /** Sends a real two-pointer Android gesture, with both fingers moving concurrently. */
-    fun pinchNormalized(
-        fromAX: Float, fromAY: Float, fromBX: Float, fromBY: Float,
-        toAX: Float, toAY: Float, toBX: Float, toBY: Float
-    ): Boolean {
-        val values = listOf(fromAX, fromAY, fromBX, fromBY, toAX, toAY, toBX, toBY)
-        if (values.any { !it.isFinite() || it !in 0f..1f }) return false
-        val a = screenPoint(fromAX, fromAY); val b = screenPoint(toAX, toAY)
-        val c = screenPoint(fromBX, fromBY); val d = screenPoint(toBX, toBY)
-        val pathA = Path().apply { moveTo(a.first, a.second); lineTo(b.first, b.second) }
-        val pathB = Path().apply { moveTo(c.first, c.second); lineTo(d.first, d.second) }
-        val gesture = GestureDescription.Builder()
-            .addStroke(GestureDescription.StrokeDescription(pathA, 0L, 110L))
-            .addStroke(GestureDescription.StrokeDescription(pathB, 0L, 110L))
-            .build()
-        return dispatchGesture(gesture, null, null)
-    }
-
     private fun dispatchSingle(x: Float, y: Float, duration: Long): Boolean {
         val path = Path().apply { moveTo(x, y) }
         return dispatchGesture(
@@ -127,24 +124,19 @@ class AuraAccessibilityService : AccessibilityService() {
         )
     }
 
-    /**
-     * Accessibility gestures use physical display coordinates, not the app
-     * content area. Use real display bounds so taps remain aligned when the
-     * status/navigation bars or edge-to-edge app insets are present.
-     */
+    /** Accessibility gestures use physical display coordinates, not app-window coordinates. */
     @Suppress("DEPRECATION")
-    private fun realDisplayMetrics(): android.util.DisplayMetrics =
-        android.util.DisplayMetrics().also { metrics ->
-            (getSystemService(Context.WINDOW_SERVICE) as WindowManager)
-                .defaultDisplay.getRealMetrics(metrics)
-        }
+    private fun refreshDisplayMetrics() {
+        cachedMetrics.setToDefaults()
+        windowManager?.defaultDisplay?.getRealMetrics(cachedMetrics)
+    }
 
     private fun screenPoint(x: Float, y: Float): Pair<Float, Float> {
-        val metrics = realDisplayMetrics()
-        val maxX = (metrics.widthPixels - 1).coerceAtLeast(1).toFloat()
-        val maxY = (metrics.heightPixels - 1).coerceAtLeast(1).toFloat()
-        return (x * metrics.widthPixels).coerceIn(1f, maxX) to
-            (y * metrics.heightPixels).coerceIn(1f, maxY)
+        if (cachedMetrics.widthPixels <= 0 || cachedMetrics.heightPixels <= 0) refreshDisplayMetrics()
+        val maxX = (cachedMetrics.widthPixels - 1).coerceAtLeast(1).toFloat()
+        val maxY = (cachedMetrics.heightPixels - 1).coerceAtLeast(1).toFloat()
+        return (x * cachedMetrics.widthPixels).coerceIn(1f, maxX) to
+            (y * cachedMetrics.heightPixels).coerceIn(1f, maxY)
     }
 
     private fun valid(x: Float, y: Float) = x.isFinite() && y.isFinite() && x in 0f..1f && y in 0f..1f
@@ -168,7 +160,8 @@ class AuraAccessibilityService : AccessibilityService() {
             color = Color.rgb(66, 217, 255); style = Paint.Style.FILL; alpha = 35
         }
         override fun onDraw(canvas: Canvas) {
-            val cx = width / 2f; val cy = height / 2f
+            val cx = width / 2f
+            val cy = height / 2f
             canvas.drawCircle(cx, cy, width * 0.43f, glow)
             canvas.drawCircle(cx, cy, width * 0.31f, outer)
             canvas.drawCircle(cx, cy, width * 0.07f, inner)
