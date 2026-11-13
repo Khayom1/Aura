@@ -61,14 +61,22 @@ class HandLandmarkAnalyzer(
             val categories = result.handedness()
             val hands = result.landmarks().mapIndexed { index, points ->
                 val category = categories.getOrNull(index)?.firstOrNull()
+                // The input bitmap is explicitly mirrored above. MediaPipe's
+                // handedness labels assume mirrored selfie input, so do not
+                // invert the returned side a second time.
                 val side = when (category?.categoryName()?.lowercase()) {
-                    "left" -> Handedness.RIGHT
-                    "right" -> Handedness.LEFT
+                    "left" -> Handedness.LEFT
+                    "right" -> Handedness.RIGHT
                     else -> Handedness.UNKNOWN
                 }
+                // HandLandmarker exposes handedness classification scores here,
+                // not hand-detection confidence. Detection has already passed
+                // the configured 0.65 detector/presence/tracking thresholds.
+                // Keep a detected 21-point hand valid even when side classification
+                // is uncertain; gesture recognition does not depend on left/right.
                 HandFrame(
                     landmarks = points.map { Landmark(it.x(), it.y()) },
-                    confidence = (category?.score() ?: 0f).coerceIn(0f, 1f),
+                    confidence = if (points.size >= 21) 1f else 0f,
                     handedness = side
                 )
             }

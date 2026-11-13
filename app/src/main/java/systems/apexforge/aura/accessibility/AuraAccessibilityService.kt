@@ -52,9 +52,11 @@ class AuraAccessibilityService : AccessibilityService() {
         }
         val params = cursorParams ?: return
         val pointerView = cursor ?: return
-        val metrics = resources.displayMetrics
-        params.x = (normalizedX * metrics.widthPixels - size / 2f).roundToInt().coerceIn(0, metrics.widthPixels - size)
-        params.y = (normalizedY * metrics.heightPixels - size / 2f).roundToInt().coerceIn(0, metrics.heightPixels - size)
+        val metrics = realDisplayMetrics()
+        params.x = (normalizedX * metrics.widthPixels - size / 2f).roundToInt()
+            .coerceIn(0, (metrics.widthPixels - size).coerceAtLeast(0))
+        params.y = (normalizedY * metrics.heightPixels - size / 2f).roundToInt()
+            .coerceIn(0, (metrics.heightPixels - size).coerceAtLeast(0))
         try { wm.updateViewLayout(pointerView, params) } catch (_: Exception) { }
     }
 
@@ -125,10 +127,24 @@ class AuraAccessibilityService : AccessibilityService() {
         )
     }
 
+    /**
+     * Accessibility gestures use physical display coordinates, not the app
+     * content area. Use real display bounds so taps remain aligned when the
+     * status/navigation bars or edge-to-edge app insets are present.
+     */
+    @Suppress("DEPRECATION")
+    private fun realDisplayMetrics(): android.util.DisplayMetrics =
+        android.util.DisplayMetrics().also { metrics ->
+            (getSystemService(Context.WINDOW_SERVICE) as WindowManager)
+                .defaultDisplay.getRealMetrics(metrics)
+        }
+
     private fun screenPoint(x: Float, y: Float): Pair<Float, Float> {
-        val metrics = resources.displayMetrics
-        return (x * metrics.widthPixels).coerceIn(1f, metrics.widthPixels - 1f) to
-            (y * metrics.heightPixels).coerceIn(1f, metrics.heightPixels - 1f)
+        val metrics = realDisplayMetrics()
+        val maxX = (metrics.widthPixels - 1).coerceAtLeast(1).toFloat()
+        val maxY = (metrics.heightPixels - 1).coerceAtLeast(1).toFloat()
+        return (x * metrics.widthPixels).coerceIn(1f, maxX) to
+            (y * metrics.heightPixels).coerceIn(1f, maxY)
     }
 
     private fun valid(x: Float, y: Float) = x.isFinite() && y.isFinite() && x in 0f..1f && y in 0f..1f

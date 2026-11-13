@@ -119,4 +119,27 @@ class GestureEngineTest {
         assertEquals(AuraCommand.NoOp, engine.process(listOf(vSign(0.6f)), 1_033L))
         assertEquals(AuraCommand.System(SystemAction.BACK), engine.process(listOf(vSign(0.25f)), 1_066L))
     }
+
+    @Test fun nonFiniteLandmarkIsRejectedSafely() {
+        val malformed = pointingHand(0.63f).let { hand ->
+            hand.copy(landmarks = hand.landmarks.toMutableList().also {
+                it[8] = Landmark(Float.NaN, 0.2f)
+            })
+        }
+        assertEquals(AuraCommand.NoOp, GestureEngine().process(listOf(malformed), 100L))
+    }
+
+    @Test fun outOfRangeLandmarkIsRejectedSafely() {
+        val malformed = pointingHand(0.63f).let { hand ->
+            hand.copy(landmarks = hand.landmarks.toMutableList().also {
+                it[8] = Landmark(1.2f, 0.2f)
+            })
+        }
+        assertEquals(AuraCommand.NoOp, GestureEngine().process(listOf(malformed), 100L))
+    }
+
+    @Test fun unknownHandednessDoesNotBlockGestureRecognition() {
+        val hand = pointingHand(0.63f).copy(handedness = Handedness.UNKNOWN)
+        assertTrue(GestureEngine().process(listOf(hand), 100L) is AuraCommand.Pointer)
+    }
 }

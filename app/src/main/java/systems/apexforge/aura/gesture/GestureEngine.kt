@@ -65,9 +65,19 @@ class GestureEngine(
 
     @Synchronized
     fun process(hands: List<HandFrame>, timestampMs: Long): AuraCommand {
-        val valid = hands.filter { it.confidence >= minConfidence && it.landmarks.size >= 21 }
-            .sortedBy { hand -> hand.landmarks[0].x + hand.landmarks[5].x + hand.landmarks[17].x }
-            .take(2)
+        // Reject malformed model output before it can reach coordinate mapping
+        // or Android's gesture injection API. Every landmark used by the grammar
+        // must be finite and normalized.
+        val valid = hands.filter { hand ->
+            hand.confidence.isFinite() && hand.confidence >= minConfidence &&
+                hand.landmarks.size >= 21 &&
+                hand.landmarks.all { point ->
+                    point.x.isFinite() && point.y.isFinite() &&
+                        point.x in 0f..1f && point.y in 0f..1f
+                }
+        }.sortedBy { hand ->
+            hand.landmarks[0].x + hand.landmarks[5].x + hand.landmarks[17].x
+        }.take(2)
 
         if (valid.isEmpty()) {
             val cancelPinchOnRecovery = suppressSinglePinch || singlePinchStart != null || dualPinchFrames > 0 || hands.size >= 2
