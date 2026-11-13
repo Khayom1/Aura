@@ -74,6 +74,8 @@ class AuraCameraService : LifecycleService() {
         listener = callback
     }
 
+    fun statusText(): String = currentStatus
+
     fun attachPreview(surfaceProvider: Preview.SurfaceProvider) {
         preview?.setSurfaceProvider(surfaceProvider)
     }
