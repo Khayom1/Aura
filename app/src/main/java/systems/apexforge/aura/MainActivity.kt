@@ -1,8 +1,11 @@
 package systems.apexforge.aura
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Bundle
+import android.provider.Settings
+import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
@@ -16,6 +19,10 @@ import androidx.core.content.ContextCompat
 class MainActivity : AppCompatActivity() {
     private lateinit var previewView: PreviewView
     private lateinit var status: TextView
+    private lateinit var sessionButton: Button
+    private var cameraProvider: ProcessCameraProvider? = null
+    private var sessionActive = false
+
     private val cameraPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) startCamera() else status.text = "CAMERA PERMISSION REQUIRED"
     }
@@ -23,9 +30,6 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         buildInterface()
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
-            startCamera()
-        } else cameraPermission.launch(Manifest.permission.CAMERA)
     }
 
     private fun buildInterface() {
@@ -44,7 +48,22 @@ class MainActivity : AppCompatActivity() {
         previewView = PreviewView(this).apply {
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
         }
+        sessionButton = Button(this).apply {
+            text = "START SESSION"
+            setOnClickListener {
+                if (sessionActive) stopSession()
+                else if (ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.CAMERA) ==
+                    PackageManager.PERMISSION_GRANTED
+                ) startCamera() else cameraPermission.launch(Manifest.permission.CAMERA)
+            }
+        }
+        val accessibilityButton = Button(this).apply {
+            text = "ACCESSIBILITY SETTINGS"
+            setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+        }
         root.addView(status)
+        root.addView(sessionButton)
+        root.addView(accessibilityButton)
         root.addView(previewView, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
         root.addView(TextView(this).apply {
             text = "FRONT CAMERA • STRICT SAFETY • ON-DEVICE PIPELINE"
@@ -54,6 +73,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startCamera() {
+        if (sessionActive) return
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
             val provider = future.get()
@@ -61,10 +81,28 @@ class MainActivity : AppCompatActivity() {
             try {
                 provider.unbindAll()
                 provider.bindToLifecycle(this, CameraSelector.DEFAULT_FRONT_CAMERA, preview)
+                cameraProvider = provider
+                sessionActive = true
+                sessionButton.text = "STOP SESSION"
                 status.text = "CAMERA READY · GESTURE ENGINE NOT YET ARMED"
             } catch (failure: Exception) {
+                sessionActive = false
+                sessionButton.text = "START SESSION"
                 status.text = "CAMERA ERROR · " + failure.javaClass.simpleName
             }
         }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun stopSession() {
+        cameraProvider?.unbindAll()
+        cameraProvider = null
+        sessionActive = false
+        sessionButton.text = "START SESSION"
+        status.text = "SYSTEM STANDBY · CAMERA RELEASED"
+    }
+
+    override fun onStop() {
+        if (sessionActive) stopSession()
+        super.onStop()
     }
 }
