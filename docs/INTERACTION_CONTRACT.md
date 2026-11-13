@@ -4,7 +4,7 @@
 - Activation: Hybrid. The user explicitly starts/stops the session.
 - Camera: front camera only.
 - Safety: Strict. Uncertain, low-confidence, unstable, or untracked input produces no action.
-- Processing: hand inference is local on the device; camera frames are not uploaded.
+- Processing: hand inference is local on the device; camera frames and image data are not uploaded. MediaPipe may transmit limited SDK usage/performance metrics as described in its [privacy notice](https://github.com/google-ai-edge/mediapipe/blob/master/mediapipe/tasks/web/vision/README.md#privacy-notice).
 - Cross-app operation: camera inference runs in a visible foreground service with an ongoing notification and a user-visible Stop action.
 
 ## One-hand control
