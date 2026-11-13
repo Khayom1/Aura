@@ -75,6 +75,12 @@ class GestureEngine(
             suppressSinglePinch = cancelPinchOnRecovery
             return AuraCommand.NoOp
         }
+        if (hands.size >= 2 && valid.size < 2) {
+            if (valid.any { isPinching(it) }) suppressSinglePinch = true
+            clearSinglePinch()
+            clearDualPinch()
+            return AuraCommand.NoOp
+        }
 
         if (commandMode) {
             if (timestampMs > commandModeUntil) {
