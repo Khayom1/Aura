@@ -1,19 +1,21 @@
 package systems.apexforge.aura.gesture
 
-import android.graphics.Bitmap
-import android.graphics.Matrix
 import android.util.Log
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
-import com.google.mediapipe.framework.image.BitmapImageBuilder
+import com.google.mediapipe.framework.image.MediaImageBuilder
 import com.google.mediapipe.tasks.core.BaseOptions
+import com.google.mediapipe.tasks.vision.core.ImageProcessingOptions
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * CameraX -> MediaPipe live video inference. Images are transformed to the
- * front-preview orientation, processed locally, then released immediately.
+ * CameraX RGBA -> MediaPipe live video inference.
+ *
+ * The camera frame is passed directly to MediaPipe with rotation metadata.
+ * This avoids allocating, rotating and mirroring a full-size Bitmap for every
+ * camera frame. Front-camera mirroring is applied only to normalized landmarks.
  */
 class HandLandmarkAnalyzer(
     context: android.content.Context,
@@ -23,6 +25,7 @@ class HandLandmarkAnalyzer(
 
     private val closed = AtomicBoolean(false)
     private var lastTimestampMs = 0L
+
     private val landmarker: HandLandmarker = run {
         val options = HandLandmarker.HandLandmarkerOptions.builder()
             .setBaseOptions(BaseOptions.builder().setModelAssetPath("hand_landmarker.task").build())
@@ -32,10 +35,7 @@ class HandLandmarkAnalyzer(
             .setMinHandPresenceConfidence(0.65f)
             .setMinTrackingConfidence(0.65f)
             .build()
-        HandLandmarker.createFromOptions(
-            context.applicationContext,
-            options
-        )
+        HandLandmarker.createFromOptions(context.applicationContext, options)
     }
 
     @Synchronized
@@ -44,38 +44,34 @@ class HandLandmarkAnalyzer(
             image.close()
             return
         }
-        var bitmapToRecycle: Bitmap? = null
+
         try {
-            val source = image.toBitmap()
-            bitmapToRecycle = source
-            val matrix = Matrix().apply {
-                postRotate(image.imageInfo.rotationDegrees.toFloat())
-                postScale(-1f, 1f)
-            }
-            val oriented = Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
-            if (oriented !== source) source.recycle()
-            bitmapToRecycle = oriented
-            val timestamp = (image.imageInfo.timestamp / 1_000_000L).coerceAtLeast(lastTimestampMs + 1L)
+            val mediaImage = image.image
+                ?: throw IllegalStateException("CameraX did not provide an RGBA media image")
+            val mpImage = MediaImageBuilder(mediaImage).build()
+            val processingOptions = ImageProcessingOptions.builder()
+                .setRotationDegrees(image.imageInfo.rotationDegrees)
+                .build()
+
+            val timestamp = (image.imageInfo.timestamp / 1_000_000L)
+                .coerceAtLeast(lastTimestampMs + 1L)
             lastTimestampMs = timestamp
-            val result = landmarker.detectForVideo(BitmapImageBuilder(oriented).build(), timestamp)
+
+            val result = landmarker.detectForVideo(mpImage, processingOptions, timestamp)
             val categories = result.handedness()
             val hands = result.landmarks().mapIndexed { index, points ->
                 val category = categories.getOrNull(index)?.firstOrNull()
-                // The input bitmap is explicitly mirrored above. MediaPipe's
-                // handedness labels assume mirrored selfie input, so do not
-                // invert the returned side a second time.
+                // MediaPipe handedness assumes mirrored selfie input. We now
+                // pass the camera image unmirrored, so invert the reported side.
                 val side = when (category?.categoryName()?.lowercase()) {
-                    "left" -> Handedness.LEFT
-                    "right" -> Handedness.RIGHT
+                    "left" -> Handedness.RIGHT
+                    "right" -> Handedness.LEFT
                     else -> Handedness.UNKNOWN
                 }
-                // HandLandmarker exposes handedness classification scores here,
-                // not hand-detection confidence. Detection has already passed
-                // the configured 0.65 detector/presence/tracking thresholds.
-                // Keep a detected 21-point hand valid even when side classification
-                // is uncertain; gesture recognition does not depend on left/right.
                 HandFrame(
-                    landmarks = points.map { Landmark(it.x(), it.y()) },
+                    // Match the mirrored front-camera preview without copying
+                    // and mirroring the entire source frame.
+                    landmarks = points.map { Landmark((1f - it.x()).coerceIn(0f, 1f), it.y().coerceIn(0f, 1f)) },
                     confidence = if (points.size >= 21) 1f else 0f,
                     handedness = side
                 )
@@ -85,7 +81,6 @@ class HandLandmarkAnalyzer(
             Log.e(TAG, "Hand inference failed", failure)
             onError(failure.javaClass.simpleName + ": " + (failure.message ?: "unknown error"))
         } finally {
-            bitmapToRecycle?.recycle()
             image.close()
         }
     }
@@ -93,7 +88,9 @@ class HandLandmarkAnalyzer(
     @Synchronized
     override fun close() {
         if (closed.compareAndSet(false, true)) {
-            try { landmarker.close() } catch (failure: Exception) {
+            try {
+                landmarker.close()
+            } catch (failure: Exception) {
                 Log.w(TAG, "Landmarker close failed", failure)
             }
         }
