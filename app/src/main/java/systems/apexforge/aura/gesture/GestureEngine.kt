@@ -70,7 +70,7 @@ class GestureEngine(
             .take(2)
 
         if (valid.isEmpty()) {
-            val cancelPinchOnRecovery = suppressSinglePinch || singlePinchStart != null || dualPinchFrames > 0
+            val cancelPinchOnRecovery = suppressSinglePinch || singlePinchStart != null || dualPinchFrames > 0 || hands.size >= 2
             reset()
             suppressSinglePinch = cancelPinchOnRecovery
             return AuraCommand.NoOp
@@ -161,8 +161,9 @@ class GestureEngine(
                 val delta = ((distance - previousDistance) / previousDistance).coerceIn(-maxZoomStep, maxZoomStep)
                 return AuraCommand.Zoom(previousPoints.first, previousPoints.second, pointA, pointB, delta)
             }
+            val interruptedPinch = isPinching(a, dualPinchFrames > 0) || isPinching(b, dualPinchFrames > 0)
             clearDualPinch()
-            suppressSinglePinch = false
+            suppressSinglePinch = interruptedPinch
             clearSinglePinch()
             return if (isOpenPalm(a) && isOpenPalm(b)) AuraCommand.Pause else AuraCommand.NoOp
         }
