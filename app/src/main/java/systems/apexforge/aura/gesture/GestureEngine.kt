@@ -14,11 +14,6 @@ sealed interface AuraCommand {
     data class Tap(val x: Float, val y: Float) : AuraCommand
     data class LongPress(val x: Float, val y: Float) : AuraCommand
     data class Swipe(val x1: Float, val y1: Float, val x2: Float, val y2: Float, val durationMs: Long) : AuraCommand
-    data class Zoom(
-        val fromA: Landmark, val fromB: Landmark,
-        val toA: Landmark, val toB: Landmark,
-        val scaleDelta: Float
-    ) : AuraCommand
     data class System(val action: SystemAction) : AuraCommand
     data object CommandModeEntered : AuraCommand
     data object CommandModeArming : AuraCommand
@@ -27,37 +22,32 @@ sealed interface AuraCommand {
 }
 
 /**
- * Strict gesture grammar. Commands are emitted only after stable, explicit poses.
- * This class never performs Android actions directly.
+ * Single-hand gesture grammar. Extra hands are ignored; the camera model is
+ * configured to detect only one hand. All actions require a valid 21-point pose.
  */
 class GestureEngine(
     private val minConfidence: Float = 0.88f,
     private val pinchEnterRatio: Float = 0.30f,
     private val pinchExitRatio: Float = 0.42f,
-    private val maxZoomStep: Float = 0.12f,
     private val clickMaxMs: Long = 420L,
     private val longPressMs: Long = 560L,
     private val fistArmMs: Long = 850L,
     private val commandModeMs: Long = 4_500L,
     private val commandSwipeDistance: Float = 0.19f
 ) {
-    private var previousDualDistance: Float? = null
-    private var previousDualPoints: Pair<Landmark, Landmark>? = null
-    private var dualPinchFrames = 0
     private var singlePinchStart: Landmark? = null
     private var singlePinchLast: Landmark? = null
     private var singlePinchStartedAt = 0L
+    private var suppressPinchUntilRelease = false
     private var fistStartedAt = 0L
     private var commandModeUntil = 0L
     private var commandAnchor: Landmark? = null
     private var commandMode = false
     private var filteredPointer: Landmark? = null
-    private var suppressSinglePinch = false
 
     init {
         require(minConfidence in 0f..1f)
         require(pinchEnterRatio in 0.1f..0.5f && pinchExitRatio > pinchEnterRatio && pinchExitRatio <= 0.7f)
-        require(maxZoomStep in 0f..1f)
         require(clickMaxMs in 100L..800L && longPressMs > clickMaxMs)
         require(fistArmMs in 500L..2_000L && commandModeMs in 1_000L..10_000L)
         require(commandSwipeDistance in 0.1f..0.4f)
@@ -65,30 +55,19 @@ class GestureEngine(
 
     @Synchronized
     fun process(hands: List<HandFrame>, timestampMs: Long): AuraCommand {
-        // Reject malformed model output before it can reach coordinate mapping
-        // or Android's gesture injection API. Every landmark used by the grammar
-        // must be finite and normalized.
-        val valid = hands.filter { hand ->
-            hand.confidence.isFinite() && hand.confidence >= minConfidence &&
-                hand.landmarks.size >= 21 &&
-                hand.landmarks.all { point ->
+        val hand = hands.firstOrNull { candidate ->
+            candidate.confidence.isFinite() && candidate.confidence >= minConfidence &&
+                candidate.landmarks.size >= 21 &&
+                candidate.landmarks.all { point ->
                     point.x.isFinite() && point.y.isFinite() &&
                         point.x in 0f..1f && point.y in 0f..1f
                 }
-        }.sortedBy { hand ->
-            hand.landmarks[0].x + hand.landmarks[5].x + hand.landmarks[17].x
-        }.take(2)
-
-        if (valid.isEmpty()) {
-            val cancelPinchOnRecovery = suppressSinglePinch || singlePinchStart != null || dualPinchFrames > 0 || hands.size >= 2
-            reset()
-            suppressSinglePinch = cancelPinchOnRecovery
-            return AuraCommand.NoOp
         }
-        if (hands.size >= 2 && valid.size < 2) {
-            if (valid.any { isPinching(it) }) suppressSinglePinch = true
-            clearSinglePinch()
-            clearDualPinch()
+
+        if (hand == null) {
+            val cancelPinchOnRecovery = suppressPinchUntilRelease || singlePinchStart != null
+            reset()
+            suppressPinchUntilRelease = cancelPinchOnRecovery
             return AuraCommand.NoOp
         }
 
@@ -99,13 +78,13 @@ class GestureEngine(
                 fistStartedAt = 0L
                 return AuraCommand.Pause
             }
-            if (valid.size == 1 && isOpenPalm(valid.first())) {
+            if (isOpenPalm(hand)) {
                 commandMode = false
                 commandAnchor = null
                 return AuraCommand.Pause
             }
-            if (valid.size == 1 && isVSign(valid.first())) {
-                val point = indexTip(valid.first())
+            if (isVSign(hand)) {
+                val point = indexTip(hand)
                 val anchor = commandAnchor
                 if (anchor == null) {
                     commandAnchor = point
@@ -134,14 +113,21 @@ class GestureEngine(
             return AuraCommand.NoOp
         }
 
-        if (valid.size == 1 && isFist(valid.first()) && !isPinching(valid.first())) {
+        if (suppressPinchUntilRelease) {
+            if (!isPinching(hand, alreadyActive = true)) suppressPinchUntilRelease = false
+            clearSinglePinch()
+            return AuraCommand.NoOp
+        }
+
+        if (isFist(hand) && !isPinching(hand)) {
             if (fistStartedAt == 0L) fistStartedAt = timestampMs
             if (timestampMs - fistStartedAt >= fistArmMs) {
                 commandMode = true
                 commandModeUntil = timestampMs + commandModeMs
                 commandAnchor = null
                 fistStartedAt = 0L
-                clearInteraction()
+                clearSinglePinch()
+                filteredPointer = null
                 return AuraCommand.CommandModeEntered
             }
             return AuraCommand.CommandModeArming
@@ -151,46 +137,13 @@ class GestureEngine(
             return AuraCommand.Pause
         }
 
-        if (valid.size == 2) {
-            val a = valid[0]
-            val b = valid[1]
-            if (isPinching(a, dualPinchFrames > 0) && isPinching(b, dualPinchFrames > 0)) {
-                val pointA = indexTip(a)
-                val pointB = indexTip(b)
-                val distance = distance(pointA, pointB)
-                val previousDistance = previousDualDistance
-                val previousPoints = previousDualPoints
-                previousDualDistance = distance
-                previousDualPoints = pointA to pointB
-                dualPinchFrames++
-                suppressSinglePinch = true
-                clearSinglePinch()
-                if (dualPinchFrames < 3 || previousDistance == null || previousPoints == null || previousDistance <= 0.001f) {
-                    return AuraCommand.NoOp
-                }
-                val delta = ((distance - previousDistance) / previousDistance).coerceIn(-maxZoomStep, maxZoomStep)
-                return AuraCommand.Zoom(previousPoints.first, previousPoints.second, pointA, pointB, delta)
-            }
-            val interruptedPinch = isPinching(a, dualPinchFrames > 0) || isPinching(b, dualPinchFrames > 0)
-            clearDualPinch()
-            suppressSinglePinch = interruptedPinch
-            clearSinglePinch()
-            return if (isOpenPalm(a) && isOpenPalm(b)) AuraCommand.Pause else AuraCommand.NoOp
-        }
-
-        clearDualPinch()
-        val hand = valid.first()
-        if (suppressSinglePinch) {
-            if (!isPinching(hand, true)) suppressSinglePinch = false
-            clearSinglePinch()
-            return AuraCommand.NoOp
-        }
         if (isOpenPalm(hand)) {
             clearSinglePinch()
+            filteredPointer = null
             return AuraCommand.Pause
         }
 
-        if (isPinching(hand, singlePinchStart != null)) {
+        if (isPinching(hand, alreadyActive = singlePinchStart != null)) {
             val point = indexTip(hand)
             if (singlePinchStart == null) {
                 singlePinchStart = point
@@ -219,9 +172,11 @@ class GestureEngine(
         return if (isIndexOnly(hand)) {
             val tip = indexTip(hand)
             val previous = filteredPointer
+            // Higher alpha reduces cursor lag while retaining a small amount of
+            // temporal smoothing against landmark jitter.
             val filtered = if (previous == null) tip else Landmark(
-                previous.x + (tip.x - previous.x) * 0.42f,
-                previous.y + (tip.y - previous.y) * 0.42f
+                previous.x + (tip.x - previous.x) * 0.72f,
+                previous.y + (tip.y - previous.y) * 0.72f
             )
             filteredPointer = filtered
             AuraCommand.Pointer(filtered.x.coerceIn(0f, 1f), filtered.y.coerceIn(0f, 1f))
@@ -250,38 +205,33 @@ class GestureEngine(
 
     private fun isFist(hand: HandFrame): Boolean {
         val wrist = hand.landmarks[0]
-        return listOf(8 to 6, 12 to 10, 16 to 14, 20 to 18).all { (tip, pip) ->
+        return (intArrayOf(8, 12, 16, 20)).all { tip ->
+            val pip = tip - 2
             distance(wrist, hand.landmarks[tip]) < distance(wrist, hand.landmarks[pip]) * 1.10f
         }
     }
 
     private fun isOpenPalm(hand: HandFrame): Boolean {
         val wrist = hand.landmarks[0]
-        return listOf(8 to 5, 12 to 9, 16 to 13, 20 to 17).all { (tip, base) ->
-            distance(wrist, hand.landmarks[tip]) > distance(wrist, hand.landmarks[base]) * 1.18f
+        val tips = intArrayOf(8, 12, 16, 20)
+        val bases = intArrayOf(5, 9, 13, 17)
+        return tips.indices.all { index ->
+            distance(wrist, hand.landmarks[tips[index]]) >
+                distance(wrist, hand.landmarks[bases[index]]) * 1.18f
         }
     }
 
     private fun indexTip(hand: HandFrame) = hand.landmarks[8]
     private fun distance(a: Landmark, b: Landmark) = hypot(a.x - b.x, a.y - b.y)
+
     private fun clearSinglePinch() {
         singlePinchStart = null
         singlePinchLast = null
         singlePinchStartedAt = 0L
     }
-    private fun clearDualPinch() {
-        previousDualDistance = null
-        previousDualPoints = null
-        dualPinchFrames = 0
-    }
-    private fun clearInteraction() {
-        clearSinglePinch()
-        clearDualPinch()
-        filteredPointer = null
-        suppressSinglePinch = false
-    }
+
     private fun reset() {
-        clearInteraction()
+        clearSinglePinch()
         fistStartedAt = 0L
         commandMode = false
         commandModeUntil = 0L
