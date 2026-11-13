@@ -38,19 +38,23 @@ class HandLandmarkAnalyzer(
         )
     }
 
+    @Synchronized
     override fun analyze(image: ImageProxy) {
         if (closed.get()) {
             image.close()
             return
         }
+        var bitmapToRecycle: Bitmap? = null
         try {
             val source = image.toBitmap()
+            bitmapToRecycle = source
             val matrix = Matrix().apply {
                 postRotate(image.imageInfo.rotationDegrees.toFloat())
                 postScale(-1f, 1f)
             }
             val oriented = Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
             if (oriented !== source) source.recycle()
+            bitmapToRecycle = oriented
             val timestamp = (image.imageInfo.timestamp / 1_000_000L).coerceAtLeast(lastTimestampMs + 1L)
             lastTimestampMs = timestamp
             val result = landmarker.detectForVideo(BitmapImageBuilder(oriented).build(), timestamp)
@@ -69,15 +73,16 @@ class HandLandmarkAnalyzer(
                 )
             }.filter { it.confidence >= 0.88f }
             onHands(hands, timestamp)
-            oriented.recycle()
         } catch (failure: Exception) {
             Log.e(TAG, "Hand inference failed", failure)
             onError(failure.javaClass.simpleName + ": " + (failure.message ?: "unknown error"))
         } finally {
+            bitmapToRecycle?.recycle()
             image.close()
         }
     }
 
+    @Synchronized
     override fun close() {
         if (closed.compareAndSet(false, true)) {
             try { landmarker.close() } catch (failure: Exception) {
