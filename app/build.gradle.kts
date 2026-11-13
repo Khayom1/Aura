@@ -1,5 +1,6 @@
 import java.net.URL
 import java.io.File
+import java.security.MessageDigest
 
 plugins {
     id("com.android.application")
@@ -26,19 +27,29 @@ android {
 }
 
 val handModel = layout.buildDirectory.file("generated/auraAssets/hand_landmarker.task")
+val expectedModelSize = 7_819_105L
+val expectedModelSha256 = "fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bcf3607cde1"
+fun sha256(file: File): String = MessageDigest.getInstance("SHA-256")
+    .digest(file.readBytes())
+    .joinToString("") { "%02x".format(it) }
+
 val downloadHandModel by tasks.registering {
     outputs.file(handModel)
     doLast {
         val target = handModel.get().asFile
-        if (!target.exists() || target.length() != 7_819_105L) {
+        if (!target.exists() || target.length() != expectedModelSize || sha256(target) != expectedModelSha256) {
             target.parentFile.mkdirs()
             val temp = File(target.parentFile, "hand_landmarker.task.download")
+            temp.delete()
             val connection = URL("https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task").openConnection()
             connection.connectTimeout = 20_000
             connection.readTimeout = 90_000
             connection.getInputStream().use { input -> temp.outputStream().use { output -> input.copyTo(output) } }
-            check(temp.length() == 7_819_105L) {
-                "Hand Landmarker model size mismatch; refusing to package an incomplete or unexpected model."
+            check(temp.length() == expectedModelSize) {
+                "Hand Landmarker model size mismatch; refusing to package an incomplete model."
+            }
+            check(sha256(temp) == expectedModelSha256) {
+                "Hand Landmarker model SHA-256 mismatch; refusing to package an unverified model."
             }
             if (target.exists()) target.delete()
             check(temp.renameTo(target)) { "Could not atomically place Hand Landmarker model." }
