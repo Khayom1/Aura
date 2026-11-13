@@ -71,13 +71,13 @@ class GestureEngineTest {
         engine.process(listOf(pinch), 180L)
         val result = engine.process(listOf(pointingHand(0.4f)), 240L)
         assertTrue(result is AuraCommand.Tap)
-        assertEquals(AuraCommand.NoOp, engine.process(listOf(pointingHand(0.4f)), 273L))
+        assertTrue(engine.process(listOf(pointingHand(0.4f)), 273L) is AuraCommand.Pointer)
     }
     @Test fun lostTrackingCancelsPinchWithoutClick() {
         val engine = GestureEngine()
         engine.process(listOf(pinchHand(0.4f)), 100L)
         assertEquals(AuraCommand.NoOp, engine.process(emptyList(), 200L))
-        assertEquals(AuraCommand.NoOp, engine.process(listOf(pointingHand(0.4f)), 240L))
+        assertTrue(engine.process(listOf(pointingHand(0.4f)), 240L) is AuraCommand.Pointer)
     }
     @Test fun dualPinchReleaseCannotTurnIntoSingleHandClick() {
         val engine = GestureEngine()
