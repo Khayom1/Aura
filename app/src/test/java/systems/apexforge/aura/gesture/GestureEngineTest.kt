@@ -92,6 +92,14 @@ class GestureEngineTest {
         assertTrue(engine.process(listOf(pointingHand(0.4f)), 266L) is AuraCommand.Pointer)
     }
 
+    @Test fun uncertainSecondHandBlocksSingleHandPinchClick() {
+        val engine = GestureEngine()
+        assertEquals(AuraCommand.NoOp, engine.process(listOf(pinchHand(0.4f), pinchHand(0.7f, 0.4f)), 100L))
+        assertEquals(AuraCommand.NoOp, engine.process(listOf(pinchHand(0.4f)), 133L))
+        assertEquals(AuraCommand.NoOp, engine.process(listOf(pointingHand(0.4f)), 166L))
+        assertTrue(engine.process(listOf(pointingHand(0.4f)), 199L) is AuraCommand.Pointer)
+    }
+
     @Test fun fistArmsCommandModeAndLeftVSwipeMeansBack() {
         val engine = GestureEngine()
         assertEquals(AuraCommand.CommandModeArming, engine.process(listOf(fistHand()), 100L))
