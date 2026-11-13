@@ -7,6 +7,7 @@ import android.graphics.Color
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.Button
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
@@ -21,12 +22,14 @@ import systems.apexforge.aura.accessibility.AuraAccessibilityService
 import systems.apexforge.aura.gesture.AuraCommand
 import systems.apexforge.aura.gesture.GestureEngine
 import systems.apexforge.aura.gesture.HandLandmarkAnalyzer
+import systems.apexforge.aura.gesture.HandOverlayView
 import systems.apexforge.aura.gesture.SystemAction
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
     private lateinit var previewView: PreviewView
+    private lateinit var handOverlay: HandOverlayView
     private lateinit var status: TextView
     private lateinit var sessionButton: Button
     private var cameraProvider: ProcessCameraProvider? = null
@@ -62,6 +65,18 @@ class MainActivity : AppCompatActivity() {
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
             scaleType = PreviewView.ScaleType.FILL_CENTER
         }
+        handOverlay = HandOverlayView(this).apply {
+            isClickable = false
+            isFocusable = false
+        }
+        val cameraContainer = FrameLayout(this).apply {
+            addView(previewView, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT
+            ))
+            addView(handOverlay, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT
+            ))
+        }
         sessionButton = Button(this).apply {
             text = "START SESSION"
             setOnClickListener {
@@ -78,7 +93,7 @@ class MainActivity : AppCompatActivity() {
         root.addView(status)
         root.addView(sessionButton)
         root.addView(accessibilityButton)
-        root.addView(previewView, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+        root.addView(cameraContainer, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
         root.addView(TextView(this).apply {
             text = "FRONT CAMERA • STRICT SAFETY • ON-DEVICE HAND TRACKING"
             textSize = 10f; setTextColor(Color.LTGRAY); setPadding(0, 16, 0, 0)
@@ -98,7 +113,10 @@ class MainActivity : AppCompatActivity() {
                     applicationContext,
                     onHands = { hands, timestamp ->
                         val command = gestureEngine.process(hands, timestamp)
-                        runOnUiThread { handleCommand(command, hands.size) }
+                        runOnUiThread {
+                            handOverlay.updateHands(hands)
+                            handleCommand(command, hands.size)
+                        }
                     },
                     onError = { message -> runOnUiThread { status.text = "TRACKING ERROR · $message" } }
                 )
@@ -133,6 +151,7 @@ class MainActivity : AppCompatActivity() {
         if (!sessionActive) return
         val service = AuraAccessibilityService.activeInstance
         if (handCount == 0) {
+            handOverlay.updateHands(emptyList())
             service?.hidePointer()
             status.text = "NO HANDS · SAFE IDLE"
             return
@@ -189,9 +208,14 @@ class MainActivity : AppCompatActivity() {
     private fun stopSession() {
         cameraProvider?.unbindAll()
         cameraProvider = null
-        analyzer?.close()
+        val oldAnalyzer = analyzer
+        val oldExecutor = analysisExecutor
         analyzer = null
-        analysisExecutor?.shutdown()
+        analysisExecutor = null
+        if (oldAnalyzer != null && oldExecutor != null) {
+            oldExecutor.execute { oldAnalyzer.close() }
+            oldExecutor.shutdown()
+        }
         analysisExecutor = null
         AuraAccessibilityService.activeInstance?.hidePointer()
         sessionActive = false
