@@ -69,7 +69,9 @@ class GestureEngine(
             .take(2)
 
         if (valid.isEmpty()) {
+            val cancelPinchOnRecovery = suppressSinglePinch || singlePinchStart != null || dualPinchFrames > 0
             reset()
+            suppressSinglePinch = cancelPinchOnRecovery
             return AuraCommand.NoOp
         }
 
