@@ -112,7 +112,7 @@ class GestureEngine(
             return AuraCommand.NoOp
         }
 
-        if (valid.size == 1 && isFist(valid.first())) {
+        if (valid.size == 1 && isFist(valid.first()) && !isPinching(valid.first())) {
             if (fistStartedAt == 0L) fistStartedAt = timestampMs
             if (timestampMs - fistStartedAt >= fistArmMs) {
                 commandMode = true
