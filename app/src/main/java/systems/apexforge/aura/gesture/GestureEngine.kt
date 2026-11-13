@@ -49,6 +49,7 @@ class GestureEngine(
     private var commandModeUntil = 0L
     private var commandAnchor: Landmark? = null
     private var commandMode = false
+    private var filteredPointer: Landmark? = null
 
     init {
         require(minConfidence in 0f..1f)
@@ -185,7 +186,13 @@ class GestureEngine(
 
         return if (isIndexOnly(hand)) {
             val tip = indexTip(hand)
-            AuraCommand.Pointer(tip.x.coerceIn(0f, 1f), tip.y.coerceIn(0f, 1f))
+            val previous = filteredPointer
+            val filtered = if (previous == null) tip else Landmark(
+                previous.x + (tip.x - previous.x) * 0.42f,
+                previous.y + (tip.y - previous.y) * 0.42f
+            )
+            filteredPointer = filtered
+            AuraCommand.Pointer(filtered.x.coerceIn(0f, 1f), filtered.y.coerceIn(0f, 1f))
         } else AuraCommand.NoOp
     }
 
@@ -236,6 +243,7 @@ class GestureEngine(
     private fun clearInteraction() {
         clearSinglePinch()
         clearDualPinch()
+        filteredPointer = null
     }
     private fun reset() {
         clearInteraction()
@@ -243,5 +251,6 @@ class GestureEngine(
         commandMode = false
         commandModeUntil = 0L
         commandAnchor = null
+        filteredPointer = null
     }
 }
