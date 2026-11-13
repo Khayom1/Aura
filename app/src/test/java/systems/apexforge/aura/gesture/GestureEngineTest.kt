@@ -79,6 +79,17 @@ class GestureEngineTest {
         assertEquals(AuraCommand.NoOp, engine.process(emptyList(), 200L))
         assertEquals(AuraCommand.NoOp, engine.process(listOf(pointingHand(0.4f)), 240L))
     }
+    @Test fun dualPinchReleaseCannotTurnIntoSingleHandClick() {
+        val engine = GestureEngine()
+        val pair = listOf(pinchHand(0.35f), pinchHand(0.65f))
+        engine.process(pair, 100L)
+        engine.process(pair, 133L)
+        assertTrue(engine.process(pair, 166L) is AuraCommand.Zoom)
+        assertEquals(AuraCommand.NoOp, engine.process(listOf(pinchHand(0.4f)), 200L))
+        assertEquals(AuraCommand.NoOp, engine.process(listOf(pointingHand(0.4f)), 233L))
+        assertTrue(engine.process(listOf(pointingHand(0.4f)), 266L) is AuraCommand.Pointer)
+    }
+
     @Test fun fistArmsCommandModeAndLeftVSwipeMeansBack() {
         val engine = GestureEngine()
         assertEquals(AuraCommand.NoOp, engine.process(listOf(fistHand()), 100L))
