@@ -192,8 +192,9 @@ class AuraCameraService : LifecycleService() {
 
         val analysis = ImageAnalysis.Builder()
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-            // Use CameraX's native YUV_420_888 stream. Forcing RGBA adds a
-            // per-frame YUV-to-RGB conversion before MediaPipe can process it.
+            // MediaPipe's Android MediaPipe Task input path requires RGBA_8888
+            // for CameraX frames; the analyzer reuses one ARGB bitmap per session.
+            .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
             .setTargetResolution(android.util.Size(480, 360))
             .build()
             .also { it.setAnalyzer(executor, handAnalyzer) }
