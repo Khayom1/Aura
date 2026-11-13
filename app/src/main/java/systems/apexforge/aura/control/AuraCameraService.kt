@@ -187,6 +187,15 @@ class AuraCameraService : LifecycleService() {
                     publishStatus("TRACKING ERROR · $message")
                     listener?.invoke(currentStatus, emptyList())
                 }
+            },
+            onMetrics = { metrics ->
+                mainHandler.post {
+                    performanceText = metrics
+                    if (started && currentStatus.startsWith("TRACKING")) {
+                        publishStatus("TRACKING · ONE HAND · $performanceText")
+                        listener?.invoke(currentStatus, latestPointer.get()?.hands ?: emptyList())
+                    }
+                }
             }
         )
 
@@ -262,7 +271,7 @@ class AuraCameraService : LifecycleService() {
             is AuraCommand.Pointer -> {
                 service?.showPointer(command.x, command.y)
                 if (service == null) publishStatus("HAND FOUND · ENABLE AURA ACCESSIBILITY")
-                else publishStatus("TRACKING · ONE HAND")
+                else publishStatus("TRACKING · ONE HAND · $performanceText")
             }
             is AuraCommand.Tap -> {
                 val ok = service?.tapNormalized(command.x, command.y) == true
