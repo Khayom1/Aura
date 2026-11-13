@@ -13,6 +13,7 @@ import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import kotlin.math.roundToInt
+import systems.apexforge.aura.gesture.SystemAction
 
 /** Touch injection and a non-interactive cursor overlay; user must enable this service. */
 class AuraAccessibilityService : AccessibilityService() {
@@ -62,6 +63,17 @@ class AuraAccessibilityService : AccessibilityService() {
         try { windowManager?.removeView(view) } catch (_: Exception) { }
         cursor = null
         cursorParams = null
+    }
+
+    fun performSystemAction(action: SystemAction): Boolean {
+        val global = when (action) {
+            SystemAction.BACK -> GLOBAL_ACTION_BACK
+            SystemAction.HOME -> GLOBAL_ACTION_HOME
+            SystemAction.RECENTS -> GLOBAL_ACTION_RECENTS
+            SystemAction.NOTIFICATIONS -> GLOBAL_ACTION_NOTIFICATIONS
+            SystemAction.QUICK_SETTINGS -> GLOBAL_ACTION_QUICK_SETTINGS
+        }
+        return performGlobalAction(global)
     }
 
     fun tapNormalized(x: Float, y: Float): Boolean {
