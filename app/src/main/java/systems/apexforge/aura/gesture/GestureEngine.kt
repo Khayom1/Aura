@@ -54,6 +54,7 @@ class GestureEngine(
     @Synchronized
     fun process(hands: List<HandFrame>, timestampMs: Long): AuraCommand {
         val valid = hands.filter { it.confidence >= minConfidence && it.landmarks.size >= 21 }
+            .sortedBy { hand -> hand.landmarks[0].x + hand.landmarks[5].x + hand.landmarks[17].x }
             .take(2)
         if (valid.isEmpty()) {
             reset()
