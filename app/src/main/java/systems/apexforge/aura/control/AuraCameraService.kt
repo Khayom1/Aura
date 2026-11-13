@@ -42,6 +42,7 @@ class AuraCameraService : LifecycleService() {
     private val gestureEngine = GestureEngine()
     private var cameraProvider: ProcessCameraProvider? = null
     private var preview: Preview? = null
+    private var attachedPreviewProvider: Preview.SurfaceProvider? = null
     private var analyzer: HandLandmarkAnalyzer? = null
     private var analysisExecutor: ExecutorService? = null
     private var lastInjectedAt = 0L
@@ -78,10 +79,12 @@ class AuraCameraService : LifecycleService() {
     fun statusText(): String = currentStatus
 
     fun attachPreview(surfaceProvider: Preview.SurfaceProvider) {
+        attachedPreviewProvider = surfaceProvider
         preview?.setSurfaceProvider(surfaceProvider)
     }
 
     fun detachPreview() {
+        attachedPreviewProvider = null
         preview?.setSurfaceProvider(null)
     }
 
@@ -99,6 +102,7 @@ class AuraCameraService : LifecycleService() {
         cameraProvider?.unbindAll()
         cameraProvider = null
         preview = null
+        attachedPreviewProvider = null
         val oldAnalyzer = analyzer
         val oldExecutor = analysisExecutor
         analyzer = null
@@ -144,7 +148,9 @@ class AuraCameraService : LifecycleService() {
             .setTargetResolution(android.util.Size(640, 480))
             .build()
             .also { it.setAnalyzer(executor, handAnalyzer) }
-        val cameraPreview = Preview.Builder().build()
+        val cameraPreview = Preview.Builder().build().also {
+            it.setSurfaceProvider(attachedPreviewProvider)
+        }
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
             try {
