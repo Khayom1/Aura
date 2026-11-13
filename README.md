@@ -12,7 +12,7 @@ AURA is an Android application, not a website. It uses the front camera and on-d
 | Camera | Front camera |
 | Control | One hand only |
 | Inference | MediaPipe GPU delegate when supported; automatic CPU fallback |
-| Camera pipeline | CameraX RGBA frames, latest-frame backpressure, 480 × 360 analysis |
+| Camera pipeline | CameraX native YUV_420_888 frames, latest-frame backpressure, 480 × 360 analysis |
 | Safety | Strict — uncertain input fails closed |
 | Processing | On-device; no camera frames are uploaded |
 | Cross-app control | Camera foreground service with persistent notification |
