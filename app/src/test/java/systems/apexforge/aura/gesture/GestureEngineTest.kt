@@ -64,6 +64,18 @@ class GestureEngineTest {
         assertTrue((result as AuraCommand.Zoom).scaleDelta > 0f)
         assertEquals(0.12f, result.scaleDelta, 0.001f)
     }
+    @Test fun twoPinchedHandsMovingTogetherEmitNegativeZoom() {
+        val engine = GestureEngine()
+        val first = listOf(pinchHand(0.25f), pinchHand(0.75f))
+        val second = listOf(pinchHand(0.35f), pinchHand(0.65f))
+        engine.process(first, 100L)
+        engine.process(first, 133L)
+        val result = engine.process(second, 166L)
+        assertTrue(result is AuraCommand.Zoom)
+        assertTrue((result as AuraCommand.Zoom).scaleDelta < 0f)
+        assertEquals(-0.12f, result.scaleDelta, 0.001f)
+    }
+
     @Test fun singlePinchReleaseEmitsOneTap() {
         val engine = GestureEngine()
         val pinch = pinchHand(0.4f)
