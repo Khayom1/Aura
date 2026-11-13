@@ -78,7 +78,13 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
-        if (AuraCameraService.isRunning) bindAuraService()
+        if (AuraCameraService.isRunning) {
+            bindAuraService()
+        } else {
+            sessionButton.text = "START SESSION"
+            status.text = "SYSTEM STANDBY · HYBRID MODE"
+            handOverlay.updateHands(emptyList())
+        }
     }
 
     private fun buildInterface() {
