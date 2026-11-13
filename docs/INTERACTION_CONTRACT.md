@@ -1,36 +1,61 @@
 # AURA interaction contract
 
 ## Confirmed operating profile
-- Activation: Hybrid. The user starts/stops the session explicitly; gestures are accepted only while the session is armed.
+- Activation: Hybrid. The user explicitly starts/stops the session.
 - Camera: front camera only.
 - Safety: Strict. Uncertain, low-confidence, unstable, or untracked input produces no action.
-- Processing: on-device. Camera frames are not uploaded.
+- Processing: hand inference is local on the device; camera frames are not uploaded.
+- Cross-app operation: camera inference runs in a visible foreground service with an ongoing notification and a user-visible Stop action.
 
-## Gesture grammar
+## One-hand control
+1. **Index-only point** — move the floating AURA cursor. Cursor movement is exponentially smoothed.
+2. **Thumb-index pinch, then release** — select once. A pinch is edge-triggered; holding does not generate repeated taps.
+3. **Pinch, hold, then release** — long press.
+4. **Pinch and move, then release** — swipe/drag path.
+5. **Open palm** — pause and hide the cursor.
+6. **Tracking loss** — cancel the in-progress interaction and hide the cursor.
 
-### One-hand mode
-- Index finger extended: move the virtual pointer.
-- Thumb-index pinch: select on a deliberate pinch transition; keep pinched while moving to drag.
-- Open palm: pause pointer movement.
-- Loss of tracking: cancel the active interaction and return to neutral.
+## Two-hand control
+- Both hands form thumb-index pinches.
+- The distance between the two index fingertips is tracked.
+- Move the pinched hands apart: **Zoom In**.
+- Move the pinched hands together: **Zoom Out**.
+- The gesture must be detected across multiple consecutive frames before it is emitted.
+- When one hand disappears during a dual-hand pinch, the remaining pinch is suppressed until it is released. It cannot fall through into an accidental single-hand click.
+- Both open palms pause AURA.
 
-### Two-hand mode
-- Both hands form thumb-index pinches: the distance between the two index fingertips controls zoom.
-- Move the pinched hands apart: zoom in.
-- Move them together: zoom out.
-- Both open palms: pause.
-- Any ambiguous pose, hand swap, confidence drop, or tracking loss: no-op and reset the zoom baseline.
+## System command mode
+1. Hold a closed fist for 850 ms.
+2. AURA enters command mode for up to 4.5 seconds.
+3. Show a two-finger V sign and swipe:
+   - Swipe left: Android Back.
+   - Swipe right: Android Recents.
+   - Swipe up: Android Home.
+   - Swipe down on the left half of the camera view: Notifications.
+   - Swipe down on the right half: Quick Settings.
+4. Open palm exits command mode. If no command is made before timeout, it expires without action.
 
-### Safety invariants
-1. No command is emitted below the configured confidence threshold.
-2. A missing hand cancels the current gesture; it never completes a click or drag.
-3. Zoom is bounded per frame to prevent jumps.
-4. The gesture engine does not execute Android actions itself. A separate action state machine must validate dwell time, debounce, cooldown, and session state.
-5. Android touch injection is available only after the user explicitly enables AURA's Accessibility service in system settings.
-6. Protected system dialogs and permission prompts remain under direct user control.
+System actions use Android AccessibilityService global actions and work only while the user has explicitly enabled the AURA accessibility service.
 
-## Current implementation boundary
+## Strict safety invariants
+- Hand classification confidence must be at least 0.88.
+- Pinch uses enter/exit hysteresis to reduce flicker.
+- Dual pinch requires three consecutive detected frames.
+- Zoom step per frame is capped.
+- Unknown or ambiguous poses are no-ops.
+- A lost hand cancels pending clicks and drags.
+- The system command mode is time-limited and requires a fist hold plus a separate V-sign swipe.
+- AURA never enables Accessibility or Camera permissions programmatically.
+- Protected permission dialogs remain under direct user control.
 
-The first implementation milestone adds the native Android project, front-camera preview, AccessibilityService bridge, deterministic gesture-core baseline, unit-test scaffold, and CI build workflow.
+## Current implementation
+- Native Kotlin Android app and CameraX front-camera pipeline.
+- MediaPipe Hand Landmarker configured for two hands in VIDEO mode, running on-device.
+- Hand skeleton HUD overlay.
+- Floating cursor through the accessibility overlay window type.
+- Android touch injection for taps, long presses, swipes and two-pointer pinch gestures.
+- Global Back, Home, Recents, Notifications and Quick Settings actions.
+- Lifecycle-aware camera foreground service so AURA can continue while the user switches apps.
+- GitHub Actions unit tests and debug APK build.
 
-**Hand-landmark inference is not wired to the camera yet.** The MediaPipe runtime dependency is present, but the pinned model asset, CameraX image analyzer, calibration, gesture state machine, and end-to-end device validation are still required before any hands-free command can be considered functional. The preview status intentionally says that the gesture engine is not armed.
+The implementation still requires physical-device validation on the Galaxy A35 5G. Camera framing, display-coordinate calibration, gesture thresholds and sustained thermal/battery behavior must be measured on the actual device before calling the experience production-ready.
