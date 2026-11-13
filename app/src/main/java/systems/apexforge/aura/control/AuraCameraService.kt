@@ -52,6 +52,8 @@ class AuraCameraService : LifecycleService() {
     private data class PointerUpdate(val command: AuraCommand.Pointer, val hands: List<HandFrame>)
     private val latestPointer = AtomicReference<PointerUpdate?>(null)
     private val pointerDispatchScheduled = AtomicBoolean(false)
+    private val lastContinuousCommand = AtomicReference<String?>(null)
+    private var trackingLost = false
 
     override fun onCreate() {
         super.onCreate()
@@ -104,6 +106,8 @@ class AuraCameraService : LifecycleService() {
     private fun releaseCameraPipeline() {
         started = false
         latestPointer.set(null)
+        lastContinuousCommand.set(null)
+        trackingLost = false
         cameraProvider?.unbindAll()
         cameraProvider = null
         preview = null
@@ -139,13 +143,31 @@ class AuraCameraService : LifecycleService() {
             applicationContext,
             onHands = { hands, timestamp ->
                 val command = gestureEngine.process(hands, timestamp)
-                if (command is AuraCommand.Pointer) {
-                    latestPointer.set(PointerUpdate(command, hands))
-                    dispatchLatestPointer()
-                } else {
-                    // Discrete actions must never be overwritten by a later
-                    // high-frequency pointer frame.
-                    mainHandler.post { handleCommand(command, hands) }
+                when (command) {
+                    is AuraCommand.Pointer -> {
+                        lastContinuousCommand.set("POINTER")
+                        latestPointer.set(PointerUpdate(command, hands))
+                        dispatchLatestPointer()
+                    }
+                    AuraCommand.Pause -> {
+                        // Open-palm pause is a sustained pose, not a new event
+                        // on every frame. Dispatch it once per transition.
+                        if (lastContinuousCommand.getAndSet("PAUSE") != "PAUSE") {
+                            mainHandler.post { handleCommand(command, hands) }
+                        }
+                    }
+                    AuraCommand.CommandModeArming -> {
+                        if (lastContinuousCommand.getAndSet("ARMING") != "ARMING") {
+                            mainHandler.post { handleCommand(command, hands) }
+                        }
+                    }
+                    AuraCommand.NoOp -> lastContinuousCommand.set(null)
+                    else -> {
+                        lastContinuousCommand.set(null)
+                        // Tap, long press, drag and system actions are discrete
+                        // and must never be overwritten by pointer coalescing.
+                        mainHandler.post { handleCommand(command, hands) }
+                    }
                 }
             },
             onError = { message ->
@@ -217,11 +239,15 @@ class AuraCameraService : LifecycleService() {
         if (!started) return
         val service = AuraAccessibilityService.activeInstance
         if (hands.isEmpty() || hands.none { it.confidence >= 0.88f }) {
-            service?.hidePointer()
-            publishStatus("NO CONFIDENT HAND · SAFE IDLE")
-            listener?.invoke(currentStatus, emptyList())
+            if (!trackingLost) {
+                trackingLost = true
+                service?.hidePointer()
+                publishStatus("NO CONFIDENT HAND · SAFE IDLE")
+                listener?.invoke(currentStatus, emptyList())
+            }
             return
         }
+        trackingLost = false
         when (command) {
             is AuraCommand.Pointer -> {
                 service?.showPointer(command.x, command.y)
