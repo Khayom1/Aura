@@ -3,7 +3,7 @@
 ## Confirmed operating profile
 - Activation: Hybrid. The user explicitly starts/stops the session.
 - Camera: front camera only.
-- Safety: Strict. Uncertain, low-confidence, unstable, or untracked input produces no action.
+- Safety: Strict. MediaPipe detection, presence and tracking thresholds are each 0.65; malformed, unstable or untracked input produces no action. Handedness classification is not misused as a detection-confidence score.
 - Processing: hand inference is local on the device. The merged APK removes Android's INTERNET permission, so the installed app cannot upload camera frames or SDK metrics. The model is fetched only during the build.
 - Cross-app operation: camera inference runs in a visible foreground service with an ongoing notification and a user-visible Stop action.
 
@@ -38,7 +38,7 @@
 System actions use Android AccessibilityService global actions and work only while the user has explicitly enabled the AURA accessibility service.
 
 ## Strict safety invariants
-- Hand classification confidence must be at least 0.88.
+- MediaPipe must return a complete 21-landmark hand after its configured detector/presence/tracking thresholds. Handedness score is used only for left/right labeling, never as detection confidence.
 - Pinch uses enter/exit hysteresis to reduce flicker.
 - Dual pinch requires three consecutive detected frames.
 - Zoom step per frame is capped.
@@ -53,9 +53,9 @@ System actions use Android AccessibilityService global actions and work only whi
 - MediaPipe Hand Landmarker configured for two hands in VIDEO mode, running on-device.
 - Hand skeleton HUD overlay.
 - Floating cursor through the accessibility overlay window type.
-- Android touch injection for taps, long presses, swipes and two-pointer pinch gestures.
+- Android touch injection for taps, long presses, release-triggered swipe paths and short two-pointer pinch segments.
 - Global Back, Home, Recents, Notifications and Quick Settings actions.
 - Lifecycle-aware camera foreground service so AURA can continue while the user switches apps.
 - GitHub Actions unit tests and debug APK build.
 
-The implementation still requires physical-device validation on the Galaxy A35 5G. Camera framing, display-coordinate calibration, gesture thresholds and sustained thermal/battery behavior must be measured on the actual device before calling the experience production-ready.
+The implementation still requires physical-device validation on the Galaxy A35 5G. Gesture coordinates now use real display bounds rather than app-window metrics, but actual touch alignment, front-camera mirroring, multi-touch behavior across target apps, gesture thresholds, sustained frame rate, battery use and thermal behavior must still be measured on the device. AURA is a hands-free gesture controller, not a complete semantic Android assistant: it does not read other apps' UI, type arbitrary text or understand natural-language commands.
