@@ -4,24 +4,41 @@
 
 AURA is an Android application, not a website. It uses the front camera and on-device MediaPipe hand tracking to control Android through a user-enabled Accessibility service.
 
-## Confirmed profile
+## Operating profile
 
 | Setting | Value |
 |---|---|
 | Activation | Hybrid — user starts/stops an explicit session |
 | Camera | Front camera |
+| Control | One hand only |
+| Inference | MediaPipe GPU delegate when supported; automatic CPU fallback |
+| Camera pipeline | CameraX RGBA frames, latest-frame backpressure, 480 × 360 analysis |
 | Safety | Strict — uncertain input fails closed |
-| Processing | On-device hand inference |
+| Processing | On-device; no camera frames are uploaded |
 | Cross-app control | Camera foreground service with persistent notification |
-| Device actions | Cursor, select, long press, swipe, two-hand pinch zoom, system navigation |
+| Device actions | Cursor, select, long press, swipe and system navigation |
 
 ## Gesture guide
 
 Read [docs/INTERACTION_CONTRACT.md](docs/INTERACTION_CONTRACT.md) for the full interaction grammar and safety rules.
 
-- One hand: point, pinch-select, long press, drag and pause.
-- Two hands: pinch both hands and move them apart/together to zoom.
+- Index finger only: move the floating cursor.
+- Thumb-index pinch, then release: select once.
+- Pinch and hold: long press.
+- Pinch and move, then release: drag/swipe.
+- Open palm: pause and hide the cursor.
 - System navigation: hold a fist to arm command mode, then use a V-sign swipe for Back, Home, Recents, Notifications or Quick Settings.
+
+**Two-hand tracking and two-finger zoom are disabled.** The model is configured for one hand to reduce inference work and keep the control path simple.
+
+## Performance design
+
+- MediaPipe GPU delegate is attempted first and falls back to CPU when unsupported or unstable.
+- The delegate is initialized lazily on the same dedicated worker thread that runs inference.
+- CameraX keeps only the latest frame, avoiding a queue of stale frames.
+- RGBA camera frames are wrapped directly as MediaPipe images; the app no longer creates, rotates and mirrors a new Bitmap for every frame.
+- Camera analysis is reduced to 480 × 360; the preview uses hardware-backed rendering.
+- Cursor display metrics are cached and repeated sub-pixel overlay updates are skipped.
 
 ## Build and CI
 
@@ -35,27 +52,27 @@ The GitHub Actions workflow runs unit tests and builds a debug APK. It downloads
 
 ## Install and first use
 
-For the phone-only Termux installation steps, see [docs/TERMUX_INSTALL.md](docs/TERMUX_INSTALL.md).
+For phone-only Termux installation steps, see [docs/TERMUX_INSTALL.md](docs/TERMUX_INSTALL.md).
 
-1. Download the aura-debug-apk artifact from a successful GitHub Actions run.
+1. Download the `aura-debug-apk` artifact from a successful GitHub Actions run.
 2. Install the APK on the phone.
 3. Open AURA and grant Camera permission.
 4. Tap Start Session.
 5. Open Android Accessibility settings from AURA and explicitly enable AURA Device Control.
 6. Return to AURA. Its foreground notification indicates that the camera session is active. Use Stop AURA in the notification or the app button to end it.
 
-Android may require the user to confirm APK installation and Accessibility enablement manually. AURA cannot bypass these system protections.
+Android requires the user to confirm APK installation and Accessibility enablement manually. AURA cannot bypass these system protections.
 
 Third-party model and SDK attribution is listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-## Privacy and resource use
+## Privacy and resources
 
 - Hand inference runs locally; camera frames and landmarks are not uploaded.
-- The APK explicitly removes the Android INTERNET permission from the merged manifest. The model is fetched only during the build, not by the installed app.
+- The merged APK removes Android's INTERNET permission. The model is fetched only during the build.
 - The camera remains active across apps only while the foreground session is running.
 - Android displays its camera privacy indicator and AURA's ongoing notification.
 - Continuous camera inference uses battery and can warm the phone. Stop the session when it is not needed.
 
 ## Project status
 
-This is an active prototype. CI verifies source compilation, unit tests and APK packaging; it does not replace device-level validation. Coordinate calibration, multi-touch behavior across different apps, accessibility navigation, sustained frame rate, battery use and thermal behavior must be tested on the Galaxy A35 before a stable release.
+This is an active prototype. CI verifies source compilation, unit tests and APK packaging; it does not replace physical-device validation. Actual frame rate, inference latency, touch alignment, sustained battery use and thermal behavior still need to be measured on the Galaxy A35.
