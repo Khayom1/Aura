@@ -34,6 +34,8 @@ The GitHub Actions workflow runs unit tests and builds a debug APK. It downloads
 
 ## Install and first use
 
+For the phone-only Termux installation steps, see [docs/TERMUX_INSTALL.md](docs/TERMUX_INSTALL.md).
+
 1. Download the aura-debug-apk artifact from a successful GitHub Actions run.
 2. Install the APK on the phone.
 3. Open AURA and grant Camera permission.
@@ -42,6 +44,8 @@ The GitHub Actions workflow runs unit tests and builds a debug APK. It downloads
 6. Return to AURA. Its foreground notification indicates that the camera session is active. Use Stop AURA in the notification or the app button to end it.
 
 Android may require the user to confirm APK installation and Accessibility enablement manually. AURA cannot bypass these system protections.
+
+Third-party model and SDK attribution is listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Privacy and resource use
 
