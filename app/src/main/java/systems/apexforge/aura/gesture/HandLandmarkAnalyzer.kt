@@ -16,6 +16,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * front-preview orientation, processed locally, then released immediately.
  */
 class HandLandmarkAnalyzer(
+    context: android.content.Context,
     private val onHands: (List<HandFrame>, Long) -> Unit,
     private val onError: (String) -> Unit
 ) : ImageAnalysis.Analyzer, AutoCloseable {
@@ -32,7 +33,7 @@ class HandLandmarkAnalyzer(
             .setMinTrackingConfidence(0.65f)
             .build()
         HandLandmarker.createFromOptions(
-            appContext,
+            context.applicationContext,
             options
         )
     }
@@ -87,6 +88,5 @@ class HandLandmarkAnalyzer(
 
     companion object {
         private const val TAG = "AURA-Landmarker"
-        @Volatile lateinit var appContext: android.content.Context
     }
 }
