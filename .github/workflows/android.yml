@@ -28,6 +28,9 @@ jobs:
       - name: Verify packaged hand model
         run: |
           test -s app/build/outputs/apk/debug/app-debug.apk
+          test -s app/build/generated/auraAssets/hand_landmarker.task
+          stat -c '%s %n' app/build/generated/auraAssets/hand_landmarker.task
+          sha256sum app/build/generated/auraAssets/hand_landmarker.task
           sha256sum app/build/outputs/apk/debug/app-debug.apk
       - name: Upload APK
         uses: actions/upload-artifact@v4
