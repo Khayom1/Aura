@@ -1,46 +1,55 @@
 # AURA
 
-**Native Android hands-free control prototype** for the Samsung Galaxy A35 5G.
+**A Stark-inspired native Android hands-free control system** for the Samsung Galaxy A35 5G.
 
-AURA is designed around a Stark-inspired interaction model: one hand controls a pointer; two hands perform pinch-to-zoom. It is an Android application, not a website.
+AURA is an Android application, not a website. It uses the front camera and on-device MediaPipe hand tracking to control Android through a user-enabled Accessibility service.
 
 ## Confirmed profile
 
 | Setting | Value |
 |---|---|
-| Activation | Hybrid — camera session starts only after tapping Start Session |
+| Activation | Hybrid — user starts/stops an explicit session |
 | Camera | Front camera |
-| Safety | Strict — uncertain input must fail closed |
-| Processing target | On-device |
-| Android control | Explicitly user-enabled Accessibility service |
+| Safety | Strict — uncertain input fails closed |
+| Processing | On-device hand inference |
+| Cross-app control | Camera foreground service with persistent notification |
+| Device actions | Cursor, select, long press, swipe, two-hand pinch zoom, system navigation |
 
-## Interaction contract
+## Gesture guide
 
-See docs/INTERACTION_CONTRACT.md for the complete gesture grammar and safety invariants.
+Read [docs/INTERACTION_CONTRACT.md](docs/INTERACTION_CONTRACT.md) for the full interaction grammar and safety rules.
 
-## Current milestone
+- One hand: point, pinch-select, long press, drag and pause.
+- Two hands: pinch both hands and move them apart/together to zoom.
+- System navigation: hold a fist to arm command mode, then use a V-sign swipe for Back, Home, Recents, Notifications or Quick Settings.
 
-- [x] Native Android Gradle project
-- [x] Front-camera preview with explicit start/stop
-- [x] Accessibility gesture bridge (requires user opt-in in Android Settings)
-- [x] Initial fail-closed gesture engine
-- [x] Unit-test scaffold, including two-hand zoom direction and per-frame bounds
-- [x] GitHub Actions build/test workflow
-- [ ] MediaPipe hand-landmark inference connected to CameraX frames
-- [ ] Calibrated pointer mapping and temporal stability filters
-- [ ] Pinch click/drag state machine and dual-hand zoom integration
-- [ ] Device-level validation on Galaxy A35 5G
-- [ ] Release APK and installation guide
+## Build and CI
 
-**Important:** The current app is an engineering foundation, not yet a functioning hands-free controller. The camera preview works, but hand detection is not connected and no gesture is currently injected into other apps. Do not treat this prototype as complete until the remaining checklist is validated on the phone.
+The GitHub Actions workflow runs unit tests and builds a debug APK. It downloads Google's pinned Hand Landmarker task bundle during the build and packages it as a local app asset.
 
-## Build
+- JDK 17
+- Gradle 8.11.1
+- Android SDK platform 35
+- MediaPipe Tasks Vision 0.10.21
 
-The repository's GitHub Actions workflow runs unit tests and builds a debug APK. For local Android builds, use JDK 17 and Gradle 8.11.1 with Android SDK platform 35.
+## Install and first use
 
-## Permissions and privacy
+1. Download the aura-debug-apk artifact from a successful GitHub Actions run.
+2. Install the APK on the phone.
+3. Open AURA and grant Camera permission.
+4. Tap Start Session.
+5. Open Android Accessibility settings from AURA and explicitly enable AURA Device Control.
+6. Return to AURA. Its foreground notification indicates that the camera session is active. Use Stop AURA in the notification or the app button to end it.
 
-- Camera access is requested at runtime.
-- AURA does not start its camera session automatically.
-- Accessibility access is never enabled programmatically; the user must enable it in Android Settings.
-- The planned hand inference pipeline is local. Camera frames must not be uploaded or logged.
+Android may require the user to confirm APK installation and Accessibility enablement manually. AURA cannot bypass these system protections.
+
+## Privacy and resource use
+
+- Hand inference runs locally; camera frames are not sent to a server.
+- The camera remains active across apps only while the foreground session is running.
+- Android displays its camera privacy indicator and AURA's ongoing notification.
+- Continuous camera inference uses battery and can warm the phone. Stop the session when it is not needed.
+
+## Project status
+
+This is an active prototype. CI verifies source compilation, unit tests and APK packaging; it does not replace device-level validation. Coordinate calibration, multi-touch behavior across different apps, accessibility navigation, sustained frame rate, battery use and thermal behavior must be tested on the Galaxy A35 before a stable release.
