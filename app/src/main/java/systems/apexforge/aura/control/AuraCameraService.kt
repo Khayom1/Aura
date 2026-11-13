@@ -122,6 +122,11 @@ class AuraCameraService : LifecycleService() {
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
             try {
+                if (isDestroyed || !isRunning) {
+                    handAnalyzer.close()
+                    executor.shutdown()
+                    return@addListener
+                }
                 val provider = future.get()
                 provider.bindToLifecycle(this, CameraSelector.DEFAULT_FRONT_CAMERA, cameraPreview, analysis)
                 cameraProvider = provider
@@ -191,6 +196,10 @@ class AuraCameraService : LifecycleService() {
             AuraCommand.CommandModeEntered -> {
                 service?.hidePointer()
                 publishStatus("COMMAND MODE · V-SWIPE")
+            }
+            AuraCommand.CommandModeArming -> {
+                service?.hidePointer()
+                publishStatus("HOLD FIST · ARMING COMMAND MODE")
             }
             AuraCommand.Pause -> {
                 service?.hidePointer()
