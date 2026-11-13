@@ -49,7 +49,8 @@ Third-party model and SDK attribution is listed in [THIRD_PARTY_NOTICES.md](THIR
 
 ## Privacy and resource use
 
-- Hand inference runs locally; camera frames are not sent to a server.
+- Hand inference runs locally; camera frames and landmark images are not uploaded.
+- MediaPipe may collect limited SDK usage/performance metrics; see the [MediaPipe privacy documentation](https://github.com/google-ai-edge/mediapipe/blob/master/mediapipe/tasks/web/vision/README.md#privacy-notice).
 - The camera remains active across apps only while the foreground session is running.
 - Android displays its camera privacy indicator and AURA's ongoing notification.
 - Continuous camera inference uses battery and can warm the phone. Stop the session when it is not needed.
