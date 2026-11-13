@@ -2,6 +2,7 @@ package systems.apexforge.aura
 
 import android.Manifest
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
@@ -176,7 +177,7 @@ class MainActivity : AppCompatActivity() {
         serviceBound = bindService(
             Intent(this, AuraCameraService::class.java),
             serviceConnection,
-            BIND_AUTO_CREATE
+            Context.BIND_AUTO_CREATE
         )
     }
 
