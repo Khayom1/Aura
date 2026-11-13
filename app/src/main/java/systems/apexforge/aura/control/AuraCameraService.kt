@@ -145,9 +145,15 @@ class AuraCameraService : LifecycleService() {
 
         val analysis = ImageAnalysis.Builder()
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-            .setTargetResolution(android.util.Size(640, 480))
+            // Lower analysis resolution reduces model input and memory bandwidth.
+            // The visible preview remains at the camera's native preview resolution.
+            .setTargetResolution(android.util.Size(480, 360))
+            // MediaPipe consumes RGBA media images directly; no per-frame Bitmap
+            // allocation, Matrix transform or full-frame mirror is required.
+            .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
             .build()
             .also { it.setAnalyzer(executor, handAnalyzer) }
+
         val cameraPreview = Preview.Builder().build().also {
             it.setSurfaceProvider(attachedPreviewProvider)
         }
