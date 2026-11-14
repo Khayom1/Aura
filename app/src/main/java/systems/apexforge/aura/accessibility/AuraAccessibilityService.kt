@@ -13,18 +13,20 @@ import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
-import kotlin.math.abs
 import kotlin.math.roundToInt
 import systems.apexforge.aura.gesture.SystemAction
 
-/** Single-pointer touch injection and cursor overlay; user must enable this service. */
+/**
+ * Touch injection and a non-interactive full-screen cursor layer.
+ *
+ * The overlay window is created once per tracking session. Frame updates only
+ * change two normalized floats and invalidate its Canvas; no WindowManager
+ * relayout IPC is performed for every camera frame.
+ */
 class AuraAccessibilityService : AccessibilityService() {
     private var windowManager: WindowManager? = null
     private var cursor: CursorView? = null
-    private var cursorParams: WindowManager.LayoutParams? = null
     private val cachedMetrics = DisplayMetrics()
-    private var lastCursorX = Int.MIN_VALUE
-    private var lastCursorY = Int.MIN_VALUE
     private var lastDisplayRotation = -1
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
@@ -40,52 +42,37 @@ class AuraAccessibilityService : AccessibilityService() {
     fun showPointer(normalizedX: Float, normalizedY: Float) {
         if (!valid(normalizedX, normalizedY)) return
         val wm = windowManager ?: return
-        val size = dp(42)
-        if (cursor == null) {
-            val view = CursorView(this)
+        var view = cursor
+        if (view == null) {
+            view = CursorView(this)
             val params = WindowManager.LayoutParams(
-                size, size,
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                     WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
                     WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.TRANSLUCENT
-            ).apply { gravity = Gravity.TOP or Gravity.START }
+            ).apply {
+                gravity = Gravity.TOP or Gravity.START
+                x = 0
+                y = 0
+            }
             try {
                 wm.addView(view, params)
                 cursor = view
-                cursorParams = params
-            } catch (_: Exception) { return }
+            } catch (_: Exception) {
+                cursor = null
+                return
+            }
         }
-        val params = cursorParams ?: return
-        val pointerView = cursor ?: return
-        val displayRotation = currentDisplayRotation()
-        if (cachedMetrics.widthPixels <= 0 || cachedMetrics.heightPixels <= 0 || displayRotation != lastDisplayRotation) {
-            refreshDisplayMetrics()
-        }
-        val x = (normalizedX * cachedMetrics.widthPixels - size / 2f).roundToInt()
-            .coerceIn(0, (cachedMetrics.widthPixels - size).coerceAtLeast(0))
-        val y = (normalizedY * cachedMetrics.heightPixels - size / 2f).roundToInt()
-            .coerceIn(0, (cachedMetrics.heightPixels - size).coerceAtLeast(0))
-        if (lastCursorX != Int.MIN_VALUE && lastCursorY != Int.MIN_VALUE &&
-            abs(x - lastCursorX) < 1 && abs(y - lastCursorY) < 1
-        ) return
-        params.x = x
-        params.y = y
-        try {
-            wm.updateViewLayout(pointerView, params)
-            lastCursorX = x
-            lastCursorY = y
-        } catch (_: Exception) { }
+        view.updatePosition(normalizedX, normalizedY)
     }
 
     fun hidePointer() {
         val view = cursor ?: return
         try { windowManager?.removeView(view) } catch (_: Exception) { }
         cursor = null
-        cursorParams = null
-        lastCursorX = Int.MIN_VALUE
-        lastCursorY = Int.MIN_VALUE
     }
 
     fun performSystemAction(action: SystemAction): Boolean {
@@ -130,7 +117,9 @@ class AuraAccessibilityService : AccessibilityService() {
         )
     }
 
-    /** Accessibility gestures use physical display coordinates, not app-window coordinates. */
+    @Suppress("DEPRECATION")
+    private fun currentDisplayRotation(): Int = windowManager?.defaultDisplay?.rotation ?: -1
+
     @Suppress("DEPRECATION")
     private fun refreshDisplayMetrics() {
         cachedMetrics.setToDefaults()
@@ -141,18 +130,18 @@ class AuraAccessibilityService : AccessibilityService() {
     }
 
     private fun screenPoint(x: Float, y: Float): Pair<Float, Float> {
-        if (cachedMetrics.widthPixels <= 0 || cachedMetrics.heightPixels <= 0 || currentDisplayRotation() != lastDisplayRotation) refreshDisplayMetrics()
+        if (cachedMetrics.widthPixels <= 0 || cachedMetrics.heightPixels <= 0 ||
+            currentDisplayRotation() != lastDisplayRotation
+        ) {
+            refreshDisplayMetrics()
+        }
         val maxX = (cachedMetrics.widthPixels - 1).coerceAtLeast(1).toFloat()
         val maxY = (cachedMetrics.heightPixels - 1).coerceAtLeast(1).toFloat()
         return (x * cachedMetrics.widthPixels).coerceIn(1f, maxX) to
             (y * cachedMetrics.heightPixels).coerceIn(1f, maxY)
     }
 
-    @Suppress("DEPRECATION")
-    private fun currentDisplayRotation(): Int = windowManager?.defaultDisplay?.rotation ?: -1
-
     private fun valid(x: Float, y: Float) = x.isFinite() && y.isFinite() && x in 0f..1f && y in 0f..1f
-    private fun dp(value: Int) = (value * resources.displayMetrics.density).roundToInt()
 
     override fun onDestroy() {
         hidePointer()
@@ -162,21 +151,40 @@ class AuraAccessibilityService : AccessibilityService() {
     }
 
     private class CursorView(context: Context) : View(context) {
+        @Volatile private var normalizedX = 0.5f
+        @Volatile private var normalizedY = 0.5f
+        private val density = resources.displayMetrics.density
         private val outer = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.rgb(66, 217, 255); style = Paint.Style.STROKE; strokeWidth = 3.2f
+            color = Color.rgb(66, 217, 255)
+            style = Paint.Style.STROKE
+            strokeWidth = 3.0f * density
         }
         private val inner = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE; style = Paint.Style.FILL; alpha = 220
+            color = Color.WHITE
+            style = Paint.Style.FILL
+            alpha = 235
         }
         private val glow = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.rgb(66, 217, 255); style = Paint.Style.FILL; alpha = 35
+            color = Color.rgb(66, 217, 255)
+            style = Paint.Style.FILL
+            alpha = 40
         }
+
+        fun updatePosition(x: Float, y: Float) {
+            normalizedX = x
+            normalizedY = y
+            postInvalidateOnAnimation()
+        }
+
         override fun onDraw(canvas: Canvas) {
-            val cx = width / 2f
-            val cy = height / 2f
-            canvas.drawCircle(cx, cy, width * 0.43f, glow)
-            canvas.drawCircle(cx, cy, width * 0.31f, outer)
-            canvas.drawCircle(cx, cy, width * 0.07f, inner)
+            super.onDraw(canvas)
+            if (width <= 0 || height <= 0) return
+            val cx = normalizedX * width
+            val cy = normalizedY * height
+            val radius = 18f * density
+            canvas.drawCircle(cx, cy, radius * 1.25f, glow)
+            canvas.drawCircle(cx, cy, radius * 0.78f, outer)
+            canvas.drawCircle(cx, cy, radius * 0.16f, inner)
         }
     }
 
