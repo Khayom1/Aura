@@ -75,6 +75,14 @@ class GestureEngineTest {
         assertEquals(AuraCommand.NoOp, GestureEngine().process(emptyList(), 100L))
     }
 
+    @Test fun pointerTracksFastMovementWithoutLargeFilterLag() {
+        val engine = GestureEngine()
+        engine.process(listOf(pointingHand(0.30f)), 100L)
+        val result = engine.process(listOf(pointingHand(0.70f)), 133L)
+        assertTrue(result is AuraCommand.Pointer)
+        assertTrue("Pointer should follow a fast hand movement in the same frame", (result as AuraCommand.Pointer).x > 0.68f)
+    }
+
     @Test fun singlePinchReleaseEmitsOneTap() {
         val engine = GestureEngine()
         val pinch = pinchHand(0.4f)
