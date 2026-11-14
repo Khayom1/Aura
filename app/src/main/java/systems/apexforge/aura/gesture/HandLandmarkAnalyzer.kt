@@ -139,19 +139,21 @@ class HandLandmarkAnalyzer(
                 detector.detectForVideo(mpImage, options, timestamp)
             }
             val inferenceMs = (SystemClock.elapsedRealtime() - inferenceStartedAt).coerceAtLeast(0L)
-            updatePerformanceMetrics(inferenceMs)
+            updatePerformanceMetrics(inferenceMs, imageProxy.imageInfo.rotationDegrees)
 
             val points = result.landmarks().firstOrNull()
             val hands = if (points != null && points.size >= 21) {
-                // The preview mirrors its front-camera view for the user.
-                // Mirror normalized X coordinates, not the source pixel buffer.
+                // MediaPipe projects landmarks back to the unrotated input-buffer
+                // coordinate space. Rotate those points into display orientation,
+                // then mirror the X axis to match PreviewView's selfie preview.
+                val rotationDegrees = imageProxy.imageInfo.rotationDegrees
                 listOf(
                     HandFrame(
                         landmarks = points.map { point ->
                             CameraCoordinateMapper.toFrontPreview(
                                 point.x(),
                                 point.y(),
-                                imageProxy.imageInfo.rotationDegrees
+                                rotationDegrees
                             )
                         },
                         confidence = 1f,
@@ -176,7 +178,7 @@ class HandLandmarkAnalyzer(
         }
     }
 
-    private fun updatePerformanceMetrics(inferenceMs: Long) {
+    private fun updatePerformanceMetrics(inferenceMs: Long, rotationDegrees: Int) {
         if (warmupFramesRemaining > 0) {
             warmupFramesRemaining--
             return
@@ -192,10 +194,11 @@ class HandLandmarkAnalyzer(
         val averageInferenceMs = totalInferenceMs.toFloat() / metricFrames
         val metrics = String.format(
             Locale.US,
-            "%.0f FPS · %.0f ms · %s",
+            "%.0f FPS · %.0f ms · %s · ROT %d°",
             fps,
             averageInferenceMs,
-            activeDelegate?.name ?: "UNKNOWN"
+            activeDelegate?.name ?: "UNKNOWN",
+            rotationDegrees
         )
         onMetrics(metrics)
         metricWindowStartMs = now
