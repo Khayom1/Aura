@@ -174,10 +174,18 @@ class GestureEngine(
             val previous = filteredPointer
             // Higher alpha reduces cursor lag while retaining a small amount of
             // temporal smoothing against landmark jitter.
-            val filtered = if (previous == null) tip else Landmark(
-                previous.x + (tip.x - previous.x) * 0.72f,
-                previous.y + (tip.y - previous.y) * 0.72f
-            )
+            val filtered = if (previous == null) {
+                tip
+            } else {
+                val movement = hypot(tip.x - previous.x, tip.y - previous.y)
+                // Adaptive low-pass: keep enough filtering for stationary hand
+                // jitter, but move almost immediately when the finger travels.
+                val alpha = (0.88f + movement * 1.5f).coerceIn(0.88f, 0.98f)
+                Landmark(
+                    previous.x + (tip.x - previous.x) * alpha,
+                    previous.y + (tip.y - previous.y) * alpha
+                )
+            }
             filteredPointer = filtered
             AuraCommand.Pointer(filtered.x.coerceIn(0f, 1f), filtered.y.coerceIn(0f, 1f))
         } else AuraCommand.NoOp
