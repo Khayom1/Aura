@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
+import android.hardware.display.DisplayManager
 import android.content.pm.ServiceInfo
 import android.os.Binder
 import android.os.Build
@@ -12,6 +13,8 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.Log
+import android.view.Surface
+import android.view.WindowManager
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
@@ -47,6 +50,9 @@ class AuraCameraService : LifecycleService() {
     private var attachedPreviewProvider: Preview.SurfaceProvider? = null
     private var analyzer: HandLandmarkAnalyzer? = null
     private var analysisExecutor: ExecutorService? = null
+    private var imageAnalysis: ImageAnalysis? = null
+    private var displayManager: DisplayManager? = null
+    private var targetRotation: Int = Surface.ROTATION_0
     private var listener: ((String, List<HandFrame>) -> Unit)? = null
     private var started = false
     private data class PointerUpdate(val command: AuraCommand.Pointer, val hands: List<HandFrame>)
@@ -54,6 +60,11 @@ class AuraCameraService : LifecycleService() {
     private val pointerDispatchScheduled = AtomicBoolean(false)
     private val lastContinuousCommand = AtomicReference<String?>(null)
     private val trackingLost = AtomicBoolean(false)
+    private val displayListener = object : DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) = Unit
+        override fun onDisplayRemoved(displayId: Int) = Unit
+        override fun onDisplayChanged(displayId: Int) = updateTargetRotation()
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -108,6 +119,9 @@ class AuraCameraService : LifecycleService() {
         latestPointer.set(null)
         lastContinuousCommand.set(null)
         trackingLost.set(false)
+        displayManager?.unregisterDisplayListener(displayListener)
+        displayManager = null
+        imageAnalysis = null
         cameraProvider?.unbindAll()
         cameraProvider = null
         preview = null
@@ -199,16 +213,19 @@ class AuraCameraService : LifecycleService() {
             }
         )
 
+        targetRotation = currentDisplayRotation()
         val analysis = ImageAnalysis.Builder()
+            .setTargetRotation(targetRotation)
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             // MediaPipe's Android MediaPipe Task input path requires RGBA_8888
             // for CameraX frames; the analyzer reuses one ARGB bitmap per session.
             .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
-            .setTargetResolution(android.util.Size(480, 360))
+            .setTargetResolution(android.util.Size(360, 480))
             .build()
             .also { it.setAnalyzer(executor, handAnalyzer) }
         val cameraPreview = Preview.Builder()
-            .setTargetResolution(android.util.Size(640, 480))
+            .setTargetRotation(targetRotation)
+            .setTargetResolution(android.util.Size(480, 640))
             .build()
             .also { it.setSurfaceProvider(attachedPreviewProvider) }
 
@@ -224,9 +241,13 @@ class AuraCameraService : LifecycleService() {
                 provider.bindToLifecycle(this, CameraSelector.DEFAULT_FRONT_CAMERA, cameraPreview, analysis)
                 cameraProvider = provider
                 preview = cameraPreview
+                imageAnalysis = analysis
                 analyzer = handAnalyzer
                 analysisExecutor = executor
                 started = true
+                displayManager = getSystemService(DisplayManager::class.java).also {
+                    it.registerDisplayListener(displayListener, mainHandler)
+                }
                 publishStatus("AURA ACTIVE · SINGLE-HAND GPU/CPU TRACKING")
                 listener?.invoke(currentStatus, emptyList())
             } catch (failure: Exception) {
@@ -262,6 +283,23 @@ class AuraCameraService : LifecycleService() {
         AuraAccessibilityService.activeInstance?.hidePointer()
         publishStatus("NO CONFIDENT HAND · SAFE IDLE")
         listener?.invoke(currentStatus, emptyList())
+    }
+
+
+    @Suppress("DEPRECATION")
+    private fun currentDisplayRotation(): Int =
+        getSystemService(WindowManager::class.java).defaultDisplay.rotation
+
+    private fun updateTargetRotation() {
+        if (!started) return
+        val rotation = currentDisplayRotation()
+        if (rotation == targetRotation) return
+        targetRotation = rotation
+        // CameraX updates the ImageInfo rotation metadata and selects matching
+        // buffer dimensions without tearing down the running camera session.
+        imageAnalysis?.targetRotation = rotation
+        preview?.targetRotation = rotation
+        Log.i(TAG, "Display rotation changed: $rotation")
     }
 
     private fun handleCommand(command: AuraCommand, hands: List<HandFrame>) {
