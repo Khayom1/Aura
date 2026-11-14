@@ -342,7 +342,11 @@ class AuraCameraService : LifecycleService() {
             }
             AuraCommand.NoOp -> return
         }
-        listener?.invoke(currentStatus, hands)
+        // Pointer samples arrive at camera frame rate. Do not redraw the full
+        // hand HUD or update Activity text for each sample; the cursor is already
+        // updated directly by the accessibility overlay. HUD/status refresh is
+        // driven by discrete gestures and the slower metrics callback.
+        if (command !is AuraCommand.Pointer) listener?.invoke(currentStatus, hands)
     }
 
     @Volatile private var currentStatus = "AURA STARTING"
