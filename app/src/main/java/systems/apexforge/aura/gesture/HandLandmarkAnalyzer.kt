@@ -148,9 +148,10 @@ class HandLandmarkAnalyzer(
                 listOf(
                     HandFrame(
                         landmarks = points.map { point ->
-                            Landmark(
-                                x = (1f - point.x()).coerceIn(0f, 1f),
-                                y = point.y().coerceIn(0f, 1f)
+                            CameraCoordinateMapper.toFrontPreview(
+                                point.x(),
+                                point.y(),
+                                imageProxy.imageInfo.rotationDegrees
                             )
                         },
                         confidence = 1f,
