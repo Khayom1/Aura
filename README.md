@@ -1,6 +1,6 @@
 # AURA
 
-**Current version: 0.4.0** — single-hand control with reduced frame processing overhead and live performance diagnostics.
+**Current version: 0.5.0** — portrait-aware camera mapping and low-latency single-hand cursor control.
 
 **A Stark-inspired native Android hands-free control system** for the Samsung Galaxy A35 5G.
 
@@ -14,7 +14,7 @@ AURA is an Android application, not a website. It uses the front camera and on-d
 | Camera | Front camera |
 | Control | One hand only |
 | Inference | MediaPipe GPU delegate when supported; automatic CPU fallback |
-| Camera pipeline | CameraX RGBA_8888 frames, latest-frame backpressure, 480 × 360 analysis |
+| Camera pipeline | CameraX RGBA_8888 frames, latest-frame backpressure, portrait-targeted 360 × 480 analysis |
 | Safety | Strict — uncertain input fails closed |
 | Processing | On-device; no camera frames are uploaded |
 | Cross-app control | Camera foreground service with persistent notification |
@@ -38,9 +38,11 @@ Read [docs/INTERACTION_CONTRACT.md](docs/INTERACTION_CONTRACT.md) for the full i
 - MediaPipe GPU delegate is attempted first and falls back to CPU when unsupported or unstable.
 - The delegate is initialized lazily on the same dedicated worker thread that runs inference.
 - CameraX keeps only the latest frame, avoiding a queue of stale frames.
-- RGBA camera frames are wrapped directly as MediaPipe images; the app no longer creates, rotates and mirrors a new Bitmap for every frame.
-- Camera analysis is reduced to 480 × 360; the preview uses hardware-backed rendering.
-- Cursor display metrics are cached and repeated sub-pixel overlay updates are skipped.
+- CameraX RGBA frames are copied into one reusable ARGB bitmap per session; the app does not allocate or transform a new bitmap for each frame.
+- Analysis and preview use matching portrait 3:4 target resolutions; CameraX target rotation is refreshed when the physical display rotates.
+- MediaPipe landmarks are explicitly rotated from unrotated input coordinates into upright screen coordinates, then mirrored for the front-camera preview.
+- The cursor uses one full-screen non-touchable accessibility overlay. Per-frame movement invalidates a Canvas instead of forcing a WindowManager relayout.
+- Pointer filtering adapts to movement speed; Activity/HUD redraws are removed from the per-camera-frame cursor path.
 - The in-app status displays measured analysis FPS, average model inference latency and the active GPU/CPU delegate after warm-up.
 
 ## Build and CI
@@ -78,4 +80,4 @@ Third-party model and SDK attribution is listed in [THIRD_PARTY_NOTICES.md](THIR
 
 ## Project status
 
-This is an active prototype. CI verifies source compilation, unit tests and APK packaging; it does not replace physical-device validation. Actual frame rate, inference latency, touch alignment, sustained battery use and thermal behavior still need to be measured on the Galaxy A35.
+This is an active prototype. CI verifies source compilation, unit tests and APK packaging; it does not replace physical-device validation. The coordinate mapping has unit-test coverage for all four 90-degree rotations. Actual frame rate, inference latency, touch alignment, GPU-driver behavior, sustained battery use and thermal behavior still need physical validation on the Galaxy A35.
