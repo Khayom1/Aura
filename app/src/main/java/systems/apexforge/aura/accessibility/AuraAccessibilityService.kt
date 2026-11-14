@@ -25,6 +25,7 @@ class AuraAccessibilityService : AccessibilityService() {
     private val cachedMetrics = DisplayMetrics()
     private var lastCursorX = Int.MIN_VALUE
     private var lastCursorY = Int.MIN_VALUE
+    private var lastDisplayRotation = -1
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
     override fun onInterrupt() = Unit
@@ -58,7 +59,10 @@ class AuraAccessibilityService : AccessibilityService() {
         }
         val params = cursorParams ?: return
         val pointerView = cursor ?: return
-        if (cachedMetrics.widthPixels <= 0 || cachedMetrics.heightPixels <= 0) refreshDisplayMetrics()
+        val displayRotation = currentDisplayRotation()
+        if (cachedMetrics.widthPixels <= 0 || cachedMetrics.heightPixels <= 0 || displayRotation != lastDisplayRotation) {
+            refreshDisplayMetrics()
+        }
         val x = (normalizedX * cachedMetrics.widthPixels - size / 2f).roundToInt()
             .coerceIn(0, (cachedMetrics.widthPixels - size).coerceAtLeast(0))
         val y = (normalizedY * cachedMetrics.heightPixels - size / 2f).roundToInt()
@@ -130,16 +134,22 @@ class AuraAccessibilityService : AccessibilityService() {
     @Suppress("DEPRECATION")
     private fun refreshDisplayMetrics() {
         cachedMetrics.setToDefaults()
-        windowManager?.defaultDisplay?.getRealMetrics(cachedMetrics)
+        windowManager?.defaultDisplay?.let { display ->
+            display.getRealMetrics(cachedMetrics)
+            lastDisplayRotation = display.rotation
+        }
     }
 
     private fun screenPoint(x: Float, y: Float): Pair<Float, Float> {
-        if (cachedMetrics.widthPixels <= 0 || cachedMetrics.heightPixels <= 0) refreshDisplayMetrics()
+        if (cachedMetrics.widthPixels <= 0 || cachedMetrics.heightPixels <= 0 || currentDisplayRotation() != lastDisplayRotation) refreshDisplayMetrics()
         val maxX = (cachedMetrics.widthPixels - 1).coerceAtLeast(1).toFloat()
         val maxY = (cachedMetrics.heightPixels - 1).coerceAtLeast(1).toFloat()
         return (x * cachedMetrics.widthPixels).coerceIn(1f, maxX) to
             (y * cachedMetrics.heightPixels).coerceIn(1f, maxY)
     }
+
+    @Suppress("DEPRECATION")
+    private fun currentDisplayRotation(): Int = windowManager?.defaultDisplay?.rotation ?: -1
 
     private fun valid(x: Float, y: Float) = x.isFinite() && y.isFinite() && x in 0f..1f && y in 0f..1f
     private fun dp(value: Int) = (value * resources.displayMetrics.density).roundToInt()
